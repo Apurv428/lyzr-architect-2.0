@@ -1,5 +1,5 @@
 import { Columns, StatTile } from "@/components/metrics/charts";
-import { DangerZone, GitHubSection, ModelKeysForm, PreferencesForm, ProfileForm, Section } from "@/components/settings/settings-sections";
+import { DangerZone, GitHubSection, ModelKeysForm, PreferencesForm, ProfileForm, Section, TeammatesSection } from "@/components/settings/settings-sections";
 import { githubStatus } from "@/lib/actions/github";
 import { DAILY_CREDITS, currentCredits } from "@/lib/credits";
 import { decrypt } from "@/lib/crypto";
@@ -65,6 +65,10 @@ export default async function SettingsPage() {
           <StatTile label="AI actions · last 14 days" value={String(total)} hint="Plans, builds and agent tests" />
         </div>
         <Columns data={days.map((d) => ({ label: d.slice(5), value: perDay.get(d)! }))} unit="AI actions" />
+      </Section>
+
+      <Section title="Team" description="Invite teammates and manage their roles. RBAC and audit logs are available on Team and Enterprise plans.">
+        <TeammatesSection />
       </Section>
 
       <Section title="GitHub" description="Used for importing repos and opening pull requests.">

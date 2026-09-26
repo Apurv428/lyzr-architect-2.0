@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Code2, KeyRound, Loader2, RotateCcw, Trash2, Wand2 } from "lucide-react";
+import { Check, Code2, KeyRound, Loader2, RotateCcw, Trash2, Users, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { ThemeToggle } from "@/components/app/theme-toggle";
 import { clearTourDone } from "@/components/app/tour";
@@ -226,6 +226,79 @@ export function GitHubSection({ login }: { login: string | null }) {
       >
         Disconnect
       </Button>
+    </div>
+  );
+}
+
+const MOCK_TEAM = [
+  { name: "You", email: "you@yourcompany.com", role: "Admin", avatar: "YO" },
+  { name: "Alex Rivera", email: "alex@yourcompany.com", role: "Builder", avatar: "AR" },
+  { name: "Sam Patel", email: "sam@yourcompany.com", role: "Viewer", avatar: "SP" },
+];
+
+const ROLE_COLORS: Record<string, string> = {
+  Admin: "bg-primary/15 text-primary",
+  Builder: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+  Viewer: "bg-muted text-muted-foreground",
+};
+
+const MOCK_AUDIT = [
+  { action: "Deployed to production", who: "You", at: "2 min ago" },
+  { action: "Added OPENAI_API_KEY env var", who: "You", at: "1 hr ago" },
+  { action: "Invited alex@yourcompany.com", who: "You", at: "Yesterday" },
+  { action: "Ran agent eval suite (4/4 passed)", who: "Alex Rivera", at: "Yesterday" },
+  { action: "Pushed GitHub PR #12", who: "Alex Rivera", at: "2 days ago" },
+];
+
+export function TeammatesSection() {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">Showing example data — team features arrive in v2.</p>
+        <span className="rounded-full border border-dashed px-2.5 py-0.5 text-[10px] font-medium text-muted-foreground">Coming in v2</span>
+      </div>
+
+      <div className="overflow-hidden rounded-lg border">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b bg-muted/40">
+              <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Member</th>
+              <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Email</th>
+              <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Role</th>
+            </tr>
+          </thead>
+          <tbody>
+            {MOCK_TEAM.map((m) => (
+              <tr key={m.email} className="border-b last:border-0">
+                <td className="px-3 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="grid size-7 shrink-0 place-items-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">{m.avatar}</span>
+                    <span className="font-medium">{m.name}</span>
+                  </div>
+                </td>
+                <td className="px-3 py-2.5 text-xs text-muted-foreground">{m.email}</td>
+                <td className="px-3 py-2.5">
+                  <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", ROLE_COLORS[m.role])}>{m.role}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div>
+        <p className="mb-2 text-xs font-medium">Audit log</p>
+        <div className="space-y-1">
+          {MOCK_AUDIT.map((e, i) => (
+            <div key={i} className="flex items-center gap-3 rounded-lg border bg-background/50 px-3 py-2 text-xs">
+              <Users className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="flex-1 text-foreground">{e.action}</span>
+              <span className="text-muted-foreground">{e.who}</span>
+              <span className="text-muted-foreground">{e.at}</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
