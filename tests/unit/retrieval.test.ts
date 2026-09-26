@@ -25,13 +25,13 @@ describe("retrieval", () => {
     ]);
   });
 
-  it("ranks the passage that answers the question first", () => {
-    const top = rank(passages, "How long does a refund take?");
+  it("ranks the passage that answers the question first", async () => {
+    const top = await rank(passages, "How long does a refund take?");
     expect(top[0]).toMatchObject({ doc: "Returns-Policy.pdf", page: 2 });
   });
 
-  it("returns nothing for unrelated questions", () => {
-    expect(rank(passages, "quantum chromodynamics")).toEqual([]);
+  it("returns nothing for unrelated questions", async () => {
+    expect(await rank(passages, "quantum chromodynamics")).toEqual([]);
   });
 
   it("splits long pages into overlapping passages", () => {

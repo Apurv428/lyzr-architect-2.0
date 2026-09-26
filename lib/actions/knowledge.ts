@@ -1,6 +1,9 @@
 "use server";
 
 import { extractText, getDocumentProxy } from "unpdf";
+import { embedPassages } from "@/lib/agent/embed";
+import { chunkDocs } from "@/lib/agent/retrieval";
+import { resolveProvider } from "@/lib/ai/keys";
 import { getUser } from "@/lib/supabase/server";
 
 export type KnowledgeDoc = { id: string; node_id: string; name: string; pages: number; chars: number; created_at: string };
@@ -56,6 +59,10 @@ export async function ingestKnowledgeFile(agentId: string, nodeId: string, file:
     .select(COLUMNS)
     .single();
   if (error || !data) return { error: error?.message ?? "Couldn't save the document." };
+
+  // Embed passages in the background — failures are silent so the upload always succeeds.
+  void embedAndStore(data.id, agentId, pages).catch(() => {});
+
   return { doc: data as KnowledgeDoc, truncated: chars === MAX_CHARS };
 }
 
@@ -63,6 +70,43 @@ export async function listKnowledgeDocs(agentId: string) {
   const { supabase } = await getUser();
   const { data } = await supabase.from("knowledge_docs").select(COLUMNS).eq("agent_id", agentId).order("created_at");
   return (data ?? []) as KnowledgeDoc[];
+}
+
+/** Chunk pages, embed them, and upsert into knowledge_passages. Fire-and-forget. */
+async function embedAndStore(docId: string, agentId: string, pages: string[]) {
+  const { supabase, user } = await getUser();
+  if (!user) return;
+
+  const passages = chunkDocs([{ name: "", pages }]);
+  if (!passages.length) return;
+
+  // Resolve the user's preferred provider for embeddings.
+  const { data: secrets } = await supabase.from("user_secrets").select("anthropic_key, openai_key").eq("owner_id", user.id).maybeSingle();
+  const { data: profile } = await supabase.from("profiles").select("model_provider").eq("id", user.id).single();
+  const { resolveProvider } = await import("@/lib/ai/keys");
+  const { decrypt } = await import("@/lib/crypto");
+  const provider = resolveProvider({
+    anthropicKey: decrypt(secrets?.anthropic_key),
+    openaiKey: decrypt(secrets?.openai_key),
+    preference: (profile?.model_provider as "anthropic" | "openai" | null) ?? null,
+  });
+  if (provider.provider === "demo") return;
+
+  const embedded = await embedPassages(passages.map((p) => p.text), provider);
+
+  const rows = embedded
+    .map((e, i) => ({
+      doc_id: docId,
+      page: passages[i].page,
+      chunk_idx: i,
+      text: passages[i].text,
+      embedding: e.embedding,
+    }))
+    .filter((r) => r.embedding !== null);
+
+  if (rows.length) {
+    await supabase.from("knowledge_passages").insert(rows);
+  }
 }
 
 export async function removeKnowledgeDoc(id: string) {

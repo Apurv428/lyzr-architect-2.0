@@ -1,9 +1,18 @@
-// Lightweight retrieval: split documents into page-aware passages and rank them with BM25.
-// Good enough for policies, FAQs and handbooks without an embeddings pipeline.
+// Retrieval: BM25 over passage chunks, with optional hybrid pgvector search.
+// When a Supabase client + embedding are provided, vector results are RRF-fused with BM25.
+
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type SourceDoc = { name: string; pages: string[] };
 export type Passage = { doc: string; page: number; text: string };
 export type RankedPassage = Passage & { score: number };
+
+export type HybridOptions = {
+  supabase: SupabaseClient;
+  agentId: string;
+  nodeId: string;
+  embedding: number[];
+};
 
 const TARGET = 900;
 const OVERLAP = 150;
@@ -52,7 +61,7 @@ export function chunkDocs(docs: SourceDoc[]): Passage[] {
   return out;
 }
 
-export function rank(passages: Passage[], query: string, k = 6): RankedPassage[] {
+export function bm25(passages: Passage[], query: string, k = 6): RankedPassage[] {
   const q = [...new Set(tokenize(query))];
   if (!q.length || !passages.length) return [];
   const docs = passages.map((p) => tokenize(p.text));
@@ -77,6 +86,60 @@ export function rank(passages: Passage[], query: string, k = 6): RankedPassage[]
     .filter((p) => p.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, k);
+}
+
+/**
+ * Hybrid BM25 + vector search with Reciprocal Rank Fusion.
+ * Falls back to BM25-only when no hybrid options are provided (e.g. in tests).
+ */
+export async function rank(
+  passages: Passage[],
+  query: string,
+  k = 6,
+  hybrid?: HybridOptions,
+): Promise<RankedPassage[]> {
+  const bm25Results = bm25(passages, query, k * 2);
+
+  if (!hybrid) return bm25Results.slice(0, k);
+
+  // Fetch vector results from Postgres.
+  type VecRow = { doc_name: string; page: number; text: string; score: number };
+  const { data: vecRows } = await hybrid.supabase.rpc("knowledge_search", {
+    p_agent_id: hybrid.agentId,
+    p_node_id: hybrid.nodeId,
+    p_embedding: hybrid.embedding,
+    p_limit: k * 2,
+  });
+  const vecResults: RankedPassage[] = ((vecRows ?? []) as VecRow[]).map((r) => ({
+    doc: r.doc_name,
+    page: r.page,
+    text: r.text,
+    score: r.score,
+  }));
+
+  if (!vecResults.length) return bm25Results.slice(0, k);
+
+  // Reciprocal Rank Fusion: score = Σ 1/(60 + rank).
+  const RRF_K = 60;
+  const scores = new Map<string, { passage: Passage; score: number }>();
+
+  function key(p: Passage) {
+    return `${p.doc}::${p.page}::${p.text.slice(0, 40)}`;
+  }
+
+  bm25Results.forEach((p, rank) => {
+    const k2 = key(p);
+    scores.set(k2, { passage: p, score: (scores.get(k2)?.score ?? 0) + 1 / (RRF_K + rank) });
+  });
+  vecResults.forEach((p, rank) => {
+    const k2 = key(p);
+    scores.set(k2, { passage: p, score: (scores.get(k2)?.score ?? 0) + 1 / (RRF_K + rank) });
+  });
+
+  return [...scores.values()]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, k)
+    .map(({ passage, score }) => ({ ...passage, score }));
 }
 
 /** "Returns-Policy.pdf (p. 3, 4) · FAQ.md (p. 1)" */
