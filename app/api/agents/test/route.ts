@@ -4,6 +4,7 @@ import { describeRunError, runAgent, unavailableModel } from "@/lib/agent/run";
 import type { AgentGraph } from "@/lib/agent/types";
 import type { TraceEvent } from "@/lib/agent/trace";
 import { resolveProvider, userAI } from "@/lib/ai/keys";
+import { decrypt } from "@/lib/crypto";
 import { track } from "@/lib/analytics";
 import { OUT_OF_CREDITS, currentCredits, spendCredit } from "@/lib/credits";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
@@ -35,7 +36,7 @@ export async function POST(request: Request) {
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   const [{ data: agent }, credits, ai] = await Promise.all([
-    supabase.from("agents").select("id").eq("id", body.agentId).single(),
+    supabase.from("agents").select("id, project_id").eq("id", body.agentId).single(),
     currentCredits(supabase),
     userAI(supabase, user.id),
   ]);
@@ -45,6 +46,18 @@ export async function POST(request: Request) {
   if (unavailable) return Response.json({ error: unavailable }, { status: 400 });
   const llm = resolveProvider(ai, spec.model.startsWith("gpt") ? "openai" : "anthropic");
   if (credits <= 0 && !llm.byok) return Response.json({ error: OUT_OF_CREDITS }, { status: 402 });
+
+  // Load the Slack webhook URL if the agent uses the slack_message tool.
+  let slackWebhookUrl: string | undefined;
+  if (spec.tools.includes("slack_message") && agent.project_id) {
+    const { data: envRow } = await supabase
+      .from("env_vars")
+      .select("value")
+      .eq("project_id", agent.project_id)
+      .eq("key", "SLACK_WEBHOOK_URL")
+      .maybeSingle();
+    slackWebhookUrl = decrypt(envRow?.value) ?? undefined;
+  }
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -59,6 +72,7 @@ export async function POST(request: Request) {
           loadDocs: async () =>
             (await supabase.from("knowledge_docs").select("name, node_id, content").eq("agent_id", body.agentId)).data ?? [],
           onStep: (step) => send({ t: "step", step }),
+          slackWebhookUrl,
         });
         send({ t: "reply", text: run.text });
         const charged = !llm.byok;
