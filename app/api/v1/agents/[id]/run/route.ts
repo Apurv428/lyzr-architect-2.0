@@ -84,7 +84,8 @@ export async function POST(request: Request, ctx: RouteContext<"/api/v1/agents/[
 
   try {
     const run = await runAgent({ spec, input: body.input, history: body.history, llm, loadDocs: async () => begin.docs, slackWebhookUrl });
-    const { data: finishData, error: finishError } = await supabase.rpc("api_finish_run", {
+    // Also samples 1 in 10 runs into the owner's eval suggestions (see 0014_eval_sampling.sql).
+    const { error: finishError } = await supabase.rpc("api_finish_run", {
       p_key_hash: keyHash,
       p_call_id: begin.call_id,
       p_input: body.input,
@@ -96,28 +97,6 @@ export async function POST(request: Request, ctx: RouteContext<"/api/v1/agents/[
       p_provider: run.provider,
     });
     if (finishError) console.error("[api/v1] finish", finishError.message);
-
-    // Sample 1-in-10 runs into the suggested evals queue for owner review.
-    const runId = (finishData as { run_id?: string } | null)?.run_id;
-    if (
-      runId &&
-      Math.random() < 0.1 &&
-      body.input.length >= 20 &&
-      run.text.length >= 20
-    ) {
-      const { error: sampleError } = await supabase.from("suggested_eval_tests").insert({
-        agent_id: id,
-        run_id: runId,
-        input: body.input.slice(0, 4000),
-        output: run.text.slice(0, 4000),
-      });
-      if (!sampleError) {
-        await supabase
-          .from("agent_api_runs")
-          .update({ sampled_as_eval: true })
-          .eq("id", runId);
-      }
-    }
 
     return Response.json(
       {

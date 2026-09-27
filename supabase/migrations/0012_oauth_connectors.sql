@@ -18,6 +18,7 @@ create table if not exists public.oauth_connectors (
 
 alter table public.oauth_connectors enable row level security;
 
+drop policy if exists "owner all" on public.oauth_connectors;
 create policy "owner all" on public.oauth_connectors for all
   using (owner_id = auth.uid())
   with check (owner_id = auth.uid());

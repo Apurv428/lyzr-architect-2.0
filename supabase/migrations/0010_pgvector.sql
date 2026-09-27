@@ -19,6 +19,7 @@ create index if not exists kp_embedding_idx
   on public.knowledge_passages using ivfflat (embedding vector_cosine_ops) with (lists = 50);
 
 alter table public.knowledge_passages enable row level security;
+drop policy if exists "owner via doc" on public.knowledge_passages;
 create policy "owner via doc" on public.knowledge_passages for all
   using (
     doc_id in (
@@ -48,7 +49,9 @@ returns table (
 )
 language sql
 security definer
-set search_path = ''
+-- Pinned, but not empty: pgvector's <=> operator lives wherever the extension was created
+-- (public, or Supabase's extensions schema), and an empty path hides it.
+set search_path = public, extensions
 as $$
   select
     kp.doc_id,

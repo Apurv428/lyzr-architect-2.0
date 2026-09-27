@@ -15,5 +15,6 @@ CREATE TABLE IF NOT EXISTS e2b_sessions (
 
 ALTER TABLE e2b_sessions ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "e2b_sessions_owner" ON e2b_sessions;
 CREATE POLICY "e2b_sessions_owner" ON e2b_sessions
   USING (user_id = auth.uid());

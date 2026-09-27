@@ -17,17 +17,14 @@ MIGRATIONS_DIR="$(dirname "$0")/supabase/migrations"
 
 echo "Running migrations against $DB_HOST..."
 
-for file in "$MIGRATIONS_DIR"/0001_init.sql \
-            "$MIGRATIONS_DIR"/0002_deployments_public.sql \
-            "$MIGRATIONS_DIR"/0003_credits_and_hardening.sql \
-            "$MIGRATIONS_DIR"/0004_foundations.sql \
-            "$MIGRATIONS_DIR"/0005_storage.sql \
-            "$MIGRATIONS_DIR"/0006_knowledge.sql \
-            "$MIGRATIONS_DIR"/0007_agent_api.sql \
-            "$MIGRATIONS_DIR"/0008_evals.sql; do
+# Zero-padded names sort in the order they must run. For a fresh database; on an existing one,
+# run only the new files (e.g. paste 0015_webhooks.sql into the Supabase SQL editor).
+count=0
+for file in "$MIGRATIONS_DIR"/[0-9][0-9][0-9][0-9]_*.sql; do
   echo "  → $(basename "$file")"
   psql "postgresql://$DB_USER@$DB_HOST:$DB_PORT/$DB_NAME" -f "$file" -v ON_ERROR_STOP=1 -q
+  count=$((count + 1))
 done
 
 echo ""
-echo "All 8 migrations done."
+echo "All $count migrations done."
