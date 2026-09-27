@@ -24,6 +24,8 @@ export function ProjectMenu({ project, className }: { project: Project; classNam
   const [confirm, setConfirm] = useState("");
   const [pending, start] = useTransition();
   const live = project.status === "deployed" || Boolean(project.deploy_url);
+  // Deleting can't be undone, so the name must be typed exactly, as on GitHub.
+  const confirmed = confirm.trim() === project.name;
 
   const run = (fn: () => Promise<void>) => start(fn);
 
@@ -108,18 +110,24 @@ export function ProjectMenu({ project, className }: { project: Project; classNam
               {live && " Its live link will stop working immediately."} This can’t be undone.
             </DialogDescription>
           </DialogHeader>
-          {live && (
-            <label className="space-y-1.5 text-sm">
-              <span className="text-muted-foreground">Type <span className="font-medium text-foreground">{project.name}</span> to confirm</span>
-              <input
-                autoFocus
-                value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
-                className="h-9 w-full rounded-lg border bg-background px-3 text-sm outline-none focus:border-destructive"
-              />
-            </label>
-          )}
-          <Button variant="destructive" onClick={remove} disabled={pending || (live && confirm !== project.name)}>
+          <label className="space-y-1.5 text-sm">
+            <span className="text-muted-foreground">
+              To confirm, type <span className="font-medium break-all text-foreground">{project.name}</span> in the box below
+            </span>
+            <input
+              autoFocus
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && confirmed && !pending && remove()}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              aria-label={`Type ${project.name} to confirm`}
+              className="h-9 w-full rounded-lg border bg-background px-3 text-sm outline-none focus:border-destructive"
+            />
+          </label>
+          <Button variant="destructive" onClick={remove} disabled={pending || !confirmed}>
             {pending ? <Loader2 className="animate-spin" /> : <Trash2 />} Delete project
           </Button>
         </DialogContent>

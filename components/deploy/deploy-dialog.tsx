@@ -34,7 +34,10 @@ export function DeployDialog() {
     if (!o) setTimeout(() => setPhase("config"), 200);
   };
 
-  useEffect(() => terminal.current?.scrollTo({ top: terminal.current.scrollHeight }), [logs]);
+  // Braces matter: newer browsers return a Promise from scrollTo, and an effect may only return a cleanup function.
+  useEffect(() => {
+    terminal.current?.scrollTo({ top: terminal.current.scrollHeight });
+  }, [logs]);
 
   async function deploy() {
     setPhase("building");
