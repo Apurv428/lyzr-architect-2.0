@@ -7,7 +7,7 @@ import type { CheckpointMeta } from "@/lib/actions/checkpoints";
 import type { AgentRecord } from "@/lib/agent/types";
 import type { ChatMessage, FileMap } from "@/lib/ai/schema";
 import type { Mode } from "@/lib/types";
-import { useWorkspace } from "@/lib/workspace/store";
+import { useWorkspace, type PreviewRuntime } from "@/lib/workspace/store";
 import { cn } from "@/lib/utils";
 import { ChatPanel } from "./chat-panel";
 import { RightPane } from "./right-pane";
@@ -27,6 +27,8 @@ export type WorkspaceProps = {
   checkpoints: CheckpointMeta[];
   agent: AgentRecord | null;
   credits: number;
+  /** "webcontainer" only when the page was loaded cross-origin isolated (see next.config.ts). */
+  previewRuntime: PreviewRuntime;
   tourCompleted: boolean;
 };
 

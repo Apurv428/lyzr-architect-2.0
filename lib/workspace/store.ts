@@ -42,7 +42,10 @@ type WorkspaceState = {
 
 type WorkspaceActions = {
   init: (
-    s: Pick<WorkspaceState, "projectId" | "name" | "mode" | "githubRepo" | "thumbnailUrl" | "messages" | "files" | "prevFiles" | "checkpointId" | "checkpoints" | "agent" | "credits">,
+    s: Pick<
+      WorkspaceState,
+      "projectId" | "name" | "mode" | "githubRepo" | "thumbnailUrl" | "messages" | "files" | "prevFiles" | "checkpointId" | "checkpoints" | "agent" | "credits" | "previewRuntime"
+    >,
   ) => void;
   applyFiles: (files: FileMap, checkpoint: CheckpointMeta) => void;
   set: (s: Partial<WorkspaceState>) => void;

@@ -10,8 +10,20 @@ import type { SelectedElement } from "@/lib/workspace/sandbox";
 import { trackClientEvent } from "@/lib/actions/events";
 import { useChat } from "@/lib/workspace/use-chat";
 import { saveThumbnail } from "@/lib/workspace/thumbnail";
-import { useWorkspace, type Device } from "@/lib/workspace/store";
+import { useWorkspace, type Device, type PreviewRuntime } from "@/lib/workspace/store";
 import { cn } from "@/lib/utils";
+
+/** WebContainers need a cross-origin isolated page, and only a fresh load can turn that on or off (see next.config.ts). */
+function switchRuntime(next: PreviewRuntime) {
+  if ((next === "webcontainer") !== window.crossOriginIsolated) {
+    const url = new URL(window.location.href);
+    if (next === "webcontainer") url.searchParams.set("runtime", "webcontainer");
+    else url.searchParams.delete("runtime");
+    window.location.assign(url);
+    return;
+  }
+  useWorkspace.getState().set({ previewRuntime: next });
+}
 
 const LivePreview = dynamic(() => import("@/components/preview/live-preview").then((m) => m.LivePreview), {
   ssr: false,
@@ -196,7 +208,7 @@ export function PreviewTab() {
           {/* Runtime switcher */}
           <select
             value={previewRuntime}
-            onChange={(e) => useWorkspace.getState().set({ previewRuntime: e.target.value as typeof previewRuntime })}
+            onChange={(e) => switchRuntime(e.target.value as PreviewRuntime)}
             className="h-6 rounded border bg-background px-1.5 text-[11px] text-muted-foreground"
             title="Preview runtime"
           >

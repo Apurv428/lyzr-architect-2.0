@@ -9,6 +9,7 @@ import type { Mode } from "@/lib/types";
 
 export default async function WorkspacePage(props: PageProps<"/p/[id]">) {
   const { id } = await props.params;
+  const { runtime } = await props.searchParams;
   const { supabase, user } = await getUser();
   if (!user) notFound();
 
@@ -54,6 +55,7 @@ export default async function WorkspacePage(props: PageProps<"/p/[id]">) {
       checkpoints={(checkpoints ?? []) as CheckpointMeta[]}
       agent={(agent ?? null) as AgentRecord | null}
       credits={credits}
+      previewRuntime={runtime === "webcontainer" ? "webcontainer" : "sandpack"}
       tourCompleted={profile?.tour_completed ?? false}
     />
   );
