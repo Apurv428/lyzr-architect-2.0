@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import confetti from "canvas-confetti";
 import QRCode from "qrcode";
-import { Check, Copy, ExternalLink, Globe, Loader2, Plus, Rocket, Trash2 } from "lucide-react";
+import { Building2, Check, Copy, ExternalLink, Globe, Loader2, Mail, Plus, Rocket, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -18,7 +18,7 @@ export function DeployDialog() {
   const projectId = useWorkspace((s) => s.projectId);
   const mode = useWorkspace((s) => s.mode);
   const [phase, setPhase] = useState<Phase>("config");
-  const [env, setEnv] = useState<"production" | "preview">("production");
+  const [env, setEnv] = useState<"production" | "preview" | "enterprise">("production");
   const [vars, setVars] = useState<{ key: string; value: string }[]>([]);
   const [domain, setDomain] = useState("");
   const [logs, setLogs] = useState<DeployLog[]>([]);
@@ -93,20 +93,42 @@ export function DeployDialog() {
 
         {phase === "config" && (
           <div className="space-y-5">
-            <div className="grid grid-cols-2 gap-2">
-              {(["production", "preview"] as const).map((e) => (
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                { id: "production", label: "Production", desc: "Your main public link" },
+                { id: "preview", label: "Preview", desc: "A private test link" },
+                { id: "enterprise", label: "Enterprise", desc: "Deploy to your VPC" },
+              ] as const).map((e) => (
                 <button
-                  key={e}
-                  onClick={() => setEnv(e)}
-                  className={cn("rounded-xl border p-3 text-left transition", env === e ? "border-primary bg-primary/10 ring-2 ring-primary/30" : "hover:border-primary/40")}
+                  key={e.id}
+                  onClick={() => setEnv(e.id)}
+                  className={cn("rounded-xl border p-3 text-left transition", env === e.id ? "border-primary bg-primary/10 ring-2 ring-primary/30" : "hover:border-primary/40")}
                 >
-                  <p className="text-sm font-medium capitalize">{e}</p>
-                  <p className="text-xs text-muted-foreground">{e === "production" ? "Your main public link" : "A private test link"}</p>
+                  <p className="text-sm font-medium">{e.label}</p>
+                  <p className="text-xs text-muted-foreground">{e.desc}</p>
                 </button>
               ))}
             </div>
 
-            {mode === "pro" && (
+            {env === "enterprise" && (
+              <div className="rounded-xl border bg-card/60 p-5 space-y-3 text-center">
+                <Building2 className="mx-auto size-8 text-primary" />
+                <div>
+                  <p className="font-medium text-sm">Enterprise VPC deployment</p>
+                  <p className="mt-1 text-xs text-muted-foreground max-w-xs mx-auto">
+                    Deploy into your own AWS, GCP or Azure environment — air-gapped, with your own auth and network controls.
+                  </p>
+                </div>
+                <a
+                  href="mailto:team@architect.run?subject=Enterprise%20VPC%20deployment"
+                  className={cn("inline-flex items-center gap-2 rounded-lg border bg-background px-4 py-2 text-sm font-medium hover:bg-muted transition")}
+                >
+                  <Mail className="size-4" /> Contact sales
+                </a>
+              </div>
+            )}
+
+            {mode === "pro" && env !== "enterprise" && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-medium">Environment variables</p>
@@ -134,15 +156,15 @@ export function DeployDialog() {
               </div>
             )}
 
-            <div className="space-y-2">
+            {env !== "enterprise" && <div className="space-y-2">
               <p className="text-sm font-medium">Custom domain <span className="font-normal text-muted-foreground">(optional)</span></p>
               <label className="flex items-center gap-2 rounded-lg border bg-background px-3">
                 <Globe className="size-4 text-muted-foreground" />
                 <input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="support.yourcompany.com" className="h-9 flex-1 bg-transparent text-sm outline-none" />
               </label>
-            </div>
+            </div>}
 
-            <Button size="lg" className="w-full" onClick={deploy}><Rocket /> Deploy to {env}</Button>
+            {env !== "enterprise" && <Button size="lg" className="w-full" onClick={deploy}><Rocket /> Deploy to {env}</Button>}
           </div>
         )}
 
