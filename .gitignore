@@ -44,3 +44,8 @@ next-env.d.ts
 # test artifacts
 /test-results/
 /playwright-report/
+# saved Playwright login session (contains auth cookies)
+/.playwright/
+
+# Supabase CLI local state
+/supabase/.temp/
