@@ -67,7 +67,8 @@ All eight required features are present. I'd rather be explicit than let a demo 
 | **UI building** | ✅ Real | Select-to-edit in the preview, Monaco editor, diffs, manual edits |
 | **Agent section** | ✅ Real | React Flow canvas, settings for each block, autosave, live test console with trace |
 | — web search tool | ✅ Real on Claude | Anthropic server-side web search; simulated when the agent runs on OpenAI |
-| — email / Slack / CRM / ticket / SQL / HTTP tools | 🟡 Simulated | Realistic responses, labelled "simulated" in the trace |
+| — Slack (`Post to Slack` action) | ✅ Real | Save an incoming webhook URL in the Action block; the trace shows **live** |
+| — email / CRM / ticket / SQL / HTTP tools | 🟡 Simulated | Realistic responses, labelled "simulated" in the trace |
 | — knowledge files (PDF / TXT / MD) | ✅ Real | Text extracted per page on upload (`unpdf`), split into passages and ranked per question with BM25; the answer cites file and page, and the trace shows what was retrieved |
 | — PII redaction guardrail | ✅ Real | Masks emails, phone numbers and card numbers in agent replies |
 | — framework code (LangGraph, CrewAI, OpenAI Agents SDK, Claude Agent SDK, Google ADK, Lyzr blueprint) | 🟡 Generated starter | Kept in sync with the canvas; not executed by the platform |
@@ -110,6 +111,32 @@ flowchart LR
   CHAT & TEST & DEP & ACT & API --> DB[(Supabase<br/>Postgres + Auth + RLS)]
   PUB[/s/:slug public app/] --> DB
 ```
+
+**From prompt to running app — step by step**
+
+1. **User types a prompt and hits Send.**
+   The Zustand workspace store adds an optimistic user message, disables the composer, and POSTs to `/api/chat` with the project ID, the mode (`guided`/`pro`), and the full conversation history (most recent turn in the last message so the earlier turns hit Anthropic's prompt cache).
+
+2. **The route builds context and calls the model.**
+   `/api/chat/route.ts` runs as a Vercel Edge Function. It reads the latest checkpoint from Supabase (`checkpoints` row → `files jsonb`), assembles the system prompt (mode rules, file-tree contract, design style guide, allowed dependencies), appends the current files as the last user message, and calls `streamText` from the Vercel AI SDK with three tools registered: `ask_questions`, `propose_plan`, and `write_files`. The request goes to Claude (`claude-opus-5`) or OpenAI (`gpt-5.5`) depending on the user's provider preference.
+
+3. **The model streams back and tool calls are parsed live.**
+   The route returns an NDJSON stream. As tokens arrive the client renders them as streaming text. When the model opens a tool-call block the route accumulates the JSON argument string and — once the block closes and the argument passes its Zod schema — calls `applyToolCall`:
+   - `ask_questions` → saves a `questions` message to Supabase and emits a structured JSON event; the client renders a `QuestionsCard`.
+   - `propose_plan` → saves a `plan` message; the client renders a `PlanCard` with Approve / Refine buttons.
+   - `write_files` → saves a new `checkpoints` row (`files jsonb` keyed by path), emits each filename as a progress event; the client renders a `ProgressCard` with live ticks, then a `ChangesCard` with the change summary bullets.
+
+4. **The user approves the plan.**
+   Clicking Approve sends the next turn: `"Plan approved. Build it."` The model calls `write_files` with the full file set. The checkpoint row is written atomically; the server action `createCheckpoint` uses a Postgres function (not the anon client) so the file blob is never sent to the browser.
+
+5. **The preview re-renders.**
+   The client's Zustand store receives the new checkpoint over the stream and calls `updateSandpackFiles`. Sandpack (running in a cross-origin iframe) transpiles and runs the new React + Tailwind bundle in the browser — no build server, no round trip. Device-size toggles change the iframe's `width` CSS; Select mode injects a `postMessage` inspector script that highlights hovered elements and fires `architect:select` events back to the parent.
+
+6. **The user clicks an element and says "make the header dark."**
+   The Select-mode overlay receives the `architect:select` event, extracts the element's class list and text, and pre-fills the composer: *"Change the header (className: `bg-white text-gray-900`) to dark."* This becomes the next chat turn. The model calls `write_files` again with only the changed file; the diff view in the Code tab computes the delta against the previous checkpoint client-side with `diff`.
+
+7. **The user hits Deploy.**
+   The Deploy tab POSTs to `/api/deploy`. The route creates a `deployments` row with `is_current = true` (flipping the previous one to false), copies the checkpoint's `files jsonb` into `deployments.files`, generates a random slug, and streams staged log lines (install → build → optimise → upload) over SSE for the UX. The public route `/s/[slug]/page.tsx` reads `deployments.files` with the Supabase service role (no auth required) and serves the frozen snapshot. Rollback = `UPDATE deployments SET is_current = true WHERE id = $prev`.
 
 **Stack:** Next.js 16 (App Router, `proxy.ts`), TypeScript, Tailwind v4, shadcn/ui (Base UI), Framer Motion, Supabase, `@anthropic-ai/sdk` + `openai` (model-agnostic provider layer), Sandpack, Monaco, React Flow, Zustand.
 

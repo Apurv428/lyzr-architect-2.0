@@ -1,0 +1,351 @@
+<title>Architect 2.0 Feature Schedule</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@112,600;112,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --paper: #f5f7fa;
+    --sheet: #ffffff;
+    --ink: #17202b;
+    --ink-2: #4a5666;
+    --ink-3: #6f7b8b;
+    --rule: #dde3ea;
+    --rule-strong: #c3ccd7;
+    --grid: rgba(43, 89, 195, 0.07);
+    --accent: #2b59c3;
+    --accent-soft: rgba(43, 89, 195, 0.1);
+    --real: #1d7a50;
+    --real-bg: rgba(29, 122, 80, 0.1);
+    --partial: #0f7285;
+    --partial-bg: rgba(15, 114, 133, 0.1);
+    --sim: #9a6208;
+    --sim-bg: rgba(186, 122, 16, 0.12);
+    --gen: #5a55b8;
+    --gen-bg: rgba(90, 85, 184, 0.1);
+    --mock: #5d6875;
+    --mock-bg: rgba(93, 104, 117, 0.12);
+    --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --paper: #0e1319;
+      --sheet: #141b23;
+      --ink: #e6ebf1;
+      --ink-2: #b1bcc9;
+      --ink-3: #8894a3;
+      --rule: #243040;
+      --rule-strong: #34435a;
+      --grid: rgba(120, 160, 255, 0.06);
+      --accent: #7fa2ff;
+      --accent-soft: rgba(127, 162, 255, 0.14);
+      --real: #56c992;
+      --real-bg: rgba(86, 201, 146, 0.13);
+      --partial: #4fc3d6;
+      --partial-bg: rgba(79, 195, 214, 0.13);
+      --sim: #e3aa4a;
+      --sim-bg: rgba(227, 170, 74, 0.13);
+      --gen: #a7a3f3;
+      --gen-bg: rgba(167, 163, 243, 0.13);
+      --mock: #a3adb9;
+      --mock-bg: rgba(163, 173, 185, 0.13);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --paper: #0e1319;
+    --sheet: #141b23;
+    --ink: #e6ebf1;
+    --ink-2: #b1bcc9;
+    --ink-3: #8894a3;
+    --rule: #243040;
+    --rule-strong: #34435a;
+    --grid: rgba(120, 160, 255, 0.06);
+    --accent: #7fa2ff;
+    --accent-soft: rgba(127, 162, 255, 0.14);
+    --real: #56c992;
+    --real-bg: rgba(86, 201, 146, 0.13);
+    --partial: #4fc3d6;
+    --partial-bg: rgba(79, 195, 214, 0.13);
+    --sim: #e3aa4a;
+    --sim-bg: rgba(227, 170, 74, 0.13);
+    --gen: #a7a3f3;
+    --gen-bg: rgba(167, 163, 243, 0.13);
+    --mock: #a3adb9;
+    --mock-bg: rgba(163, 173, 185, 0.13);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font: 15px/1.55 var(--body);
+    padding-inline: 16px;
+    padding-block: 32px 64px;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; display: grid; gap: 28px; }
+
+  /* Title block, like the corner of a drawing sheet */
+  .titleblock {
+    background:
+      linear-gradient(var(--grid) 1px, transparent 1px) 0 0 / 24px 24px,
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0 / 24px 24px,
+      var(--sheet);
+    border: 1px solid var(--rule-strong);
+    border-radius: 6px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+  }
+  .titleblock .main { padding: 28px 28px 24px; display: grid; gap: 10px; }
+  .eyebrow { font: 500 11px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+  h1 {
+    margin: 0;
+    font: 700 clamp(28px, 5vw, 44px)/1.05 var(--display);
+    font-stretch: 112%;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+  .lede { margin: 0; max-width: 62ch; color: var(--ink-2); }
+  .meta { border-left: 1px solid var(--rule-strong); display: grid; grid-auto-rows: 1fr; min-width: 190px; }
+  .meta div { padding: 10px 16px; border-bottom: 1px solid var(--rule); display: grid; gap: 2px; align-content: center; }
+  .meta div:last-child { border-bottom: 0; }
+  .meta dt { font: 500 10px/1 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); }
+  .meta dd { margin: 0; font: 500 14px/1.3 var(--mono); font-variant-numeric: tabular-nums; }
+
+  /* Legend + filters */
+  .controls { display: grid; gap: 14px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 8px;
+    border: 1px solid var(--rule-strong); background: var(--sheet); color: var(--ink);
+    border-radius: 999px; padding: 6px 12px; font: 500 13px/1 var(--body); cursor: pointer;
+  }
+  .chip .n { font: 500 12px/1 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+  .chip:focus-visible, .search input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .search { display: flex; }
+  .search input {
+    width: 100%; max-width: 420px; height: 38px; padding: 0 12px;
+    border: 1px solid var(--rule-strong); border-radius: 6px; background: var(--sheet); color: var(--ink);
+    font: 14px var(--body);
+  }
+
+  /* Status marks: glyph + label, never colour alone */
+  .status {
+    display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+    font: 500 12px/1 var(--mono); padding: 5px 8px; border-radius: 4px;
+  }
+  .status::before { font-size: 11px; }
+  .s-real { color: var(--real); background: var(--real-bg); }
+  .s-real::before { content: "●"; }
+  .s-partial { color: var(--partial); background: var(--partial-bg); }
+  .s-partial::before { content: "◐"; }
+  .s-sim { color: var(--sim); background: var(--sim-bg); }
+  .s-sim::before { content: "◇"; }
+  .s-gen { color: var(--gen); background: var(--gen-bg); }
+  .s-gen::before { content: "▤"; }
+  .s-mock { color: var(--mock); background: var(--mock-bg); }
+  .s-mock::before { content: "○"; }
+  .s-soon { color: var(--mock); background: transparent; border: 1px dashed var(--rule-strong); }
+  .s-soon::before { content: "…"; }
+
+  /* Schedule sections */
+  section.group { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; }
+  .group-head { display: flex; align-items: baseline; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--rule-strong); flex-wrap: wrap; }
+  .group-head .code { font: 500 12px/1 var(--mono); color: var(--accent); letter-spacing: 0.06em; }
+  .group-head h2 { margin: 0; font: 600 19px/1.2 var(--display); font-stretch: 112%; }
+  .group-head p { margin: 0; color: var(--ink-3); font-size: 13px; flex-basis: 100%; }
+  .rows { list-style: none; margin: 0; padding: 0; }
+  .row {
+    display: grid; grid-template-columns: 64px minmax(160px, 230px) 150px 1fr; gap: 16px;
+    padding: 14px 20px; border-bottom: 1px solid var(--rule); align-items: start;
+  }
+  .row:last-child { border-bottom: 0; }
+  .row .status { justify-self: start; }
+  .row .ref { font: 500 12px/1.6 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .row .name { font-weight: 600; line-height: 1.35; }
+  .row .desc { color: var(--ink-2); font-size: 14px; max-width: 70ch; }
+  .row .desc code, .note code { font: 13px var(--mono); background: var(--accent-soft); padding: 1px 4px; border-radius: 3px; color: var(--ink); }
+  .row .req { display: inline-block; margin-top: 6px; font: 500 10px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+  .empty { padding: 18px 20px; color: var(--ink-3); }
+
+  /* Guided vs Pro */
+  .modes { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow-x: auto; }
+  .modes table { width: 100%; border-collapse: collapse; min-width: 560px; font-size: 14px; }
+  .modes th, .modes td { text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  .modes thead th { font: 500 11px/1 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); border-bottom-color: var(--rule-strong); }
+  .modes tbody th { font-weight: 600; width: 22%; }
+  .modes tr:last-child th, .modes tr:last-child td { border-bottom: 0; }
+  .modes td { color: var(--ink-2); }
+
+  h3.section-label { margin: 0; font: 500 11px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
+  .note { margin: 0; font-size: 13px; color: var(--ink-3); max-width: 80ch; }
+
+  @media (max-width: 760px) {
+    .titleblock { grid-template-columns: 1fr; }
+    .meta { border-left: 0; border-top: 1px solid var(--rule-strong); grid-template-columns: repeat(2, 1fr); grid-auto-rows: auto; min-width: 0; }
+    .meta div:nth-child(odd) { border-right: 1px solid var(--rule); }
+    .titleblock .main { padding: 22px 18px 18px; }
+    .row { grid-template-columns: 1fr auto; gap: 6px 12px; padding: 14px 16px; }
+    .row .ref { grid-column: 1; grid-row: 1; }
+    .row .status { grid-column: 2; grid-row: 1 / span 2; align-self: start; }
+    .row .name { grid-column: 1; grid-row: 2; }
+    .row .desc { grid-column: 1 / -1; }
+    .group-head { padding: 14px 16px; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .chip { transition: border-color .15s, background .15s; }
+  }
+</style>
+
+<div class="wrap">
+  <header class="titleblock">
+    <div class="main">
+      <span class="eyebrow">Sheet A-01 · Feature schedule</span>
+      <h1>Architect 2.0</h1>
+      <p class="lede">A vibe-coding platform for agentic apps. Technical and non-technical builders work on the same project, with a Guided ⇄ Pro switch that changes how much of the machinery you see. Every feature below is marked with its real status.</p>
+    </div>
+    <dl class="meta" id="meta">
+      <div><dt>Features</dt><dd id="m-total">—</dd></div>
+      <div><dt>Fully real</dt><dd id="m-real">—</dd></div>
+      <div><dt>Challenge areas</dt><dd>8 of 8</dd></div>
+      <div><dt>Revised</dt><dd>27 Sep 2026</dd></div>
+    </dl>
+  </header>
+
+  <div class="controls">
+    <div class="chips" id="chips" role="group" aria-label="Filter by status"></div>
+    <div class="search"><input id="q" type="search" placeholder="Search features, e.g. “PDF”, “PR”, “keys”" aria-label="Search features"></div>
+  </div>
+
+  <main id="groups" style="display:grid;gap:20px"></main>
+
+  <h3 class="section-label">Guided and Pro, on the same project</h3>
+  <div class="modes">
+    <table>
+      <thead><tr><th scope="col">Stage</th><th scope="col">Guided</th><th scope="col">Pro</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Start</th><td>Goal templates, plain-English prompt</td><td>Prompt, GitHub import, framework choice</td></tr>
+        <tr><th scope="row">Before building</th><td>One-click clarifying questions, then a readable plan card to approve</td><td>The same plan with data model and pipeline detail; <code style="font:13px var(--mono)">/ask</code> for questions</td></tr>
+        <tr><th scope="row">While building</th><td>“Laying out the main screen…”</td><td>“Writing /components/Inbox.tsx”</td></tr>
+        <tr><th scope="row">Code</th><td>Read-only peek</td><td>Monaco editor and diffs; manual edits become checkpoints</td></tr>
+        <tr><th scope="row">Agent</th><td>Blocks named Brain, Action, Knowledge, Rules; “Checks”</td><td>LLM, Tool, RAG, Guardrails; generated framework code; “Evals”</td></tr>
+        <tr><th scope="row">Ship</th><td>One-click deploy, share link, QR code</td><td>Env vars, preview/production, rollback, pull requests, agent API</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="note">Status means what is built. Everything was checked with typecheck, lint, 58 unit tests, 14 browser tests and a local Postgres; the live Supabase project and real model keys haven't been connected yet, so the full end-to-end runs listed in <code>REMAINING.md</code> are still to do.</p>
+</div>
+
+<script>
+  const STATUS = {
+    real: { label: "Real", cls: "s-real" },
+    partial: { label: "Real on Claude", cls: "s-partial" },
+    sim: { label: "Simulated", cls: "s-sim" },
+    gen: { label: "Generated", cls: "s-gen" },
+    mock: { label: "Mock", cls: "s-mock" },
+    soon: { label: "Coming soon", cls: "s-soon" },
+  };
+
+  // req: marks one of the eight areas the challenge asks for.
+  const GROUPS = [
+    { code: "A", title: "Getting started", blurb: "Signing in, first run, and managing projects.", items: [
+      { name: "Authentication", status: "real", req: true, desc: "Email, Google and GitHub sign-in through Supabase Auth. Row-level security on every table; sign-in redirects only go to same-site paths." },
+      { name: "Onboarding dial", status: "real", desc: "A “guide me ↔ give me control” slider sets the default mode, then a template starts the first project." },
+      { name: "Homepage / dashboard", status: "real", req: true, desc: "Prompt box with a mode switch and attachments, goal templates, and recent projects with real thumbnails." },
+      { name: "Project management", status: "real", desc: "Rename, duplicate (latest checkpoint and agent), and delete with typed confirmation for live apps. Searchable <code>/projects</code> page." },
+      { name: "First-run tour", status: "real", desc: "Guided and Pro versions. The spotlight never blocks clicks or covers its target; ←, → and Esc work; off-screen steps are skipped on phones. Shown once; Replay tour in Settings." },
+      { name: "Settings and your own keys", status: "real", desc: "Profile, default mode, dial and theme. Anthropic or OpenAI keys are verified with the provider, stored encrypted, and used instead of platform credits." },
+    ]},
+    { code: "B", title: "Building the app", blurb: "From an idea to a working preview, with a plan you approve first.", items: [
+      { name: "Chat window", status: "real", req: true, desc: "Streams from Claude (<code>claude-opus-5</code>) or OpenAI (<code>gpt-5.5</code>). The model returns plans and complete files through typed tools, and nothing is saved unless it passes schema validation." },
+      { name: "Clarifying questions", status: "real", desc: "When a request is vague, up to three one-click multiple-choice questions come before the plan. Skippable; <code>/ask</code> in Pro." },
+      { name: "Editable plan card", status: "real", desc: "Edit screens, agent steps (drag to reorder), data, rules, integrations and assumptions inline. The build follows the edited plan." },
+      { name: "Screenshot or document → app", status: "real", desc: "Attach, paste or drop up to three images, PDFs or text files. Stored privately per user and sent to the model until a build has used them." },
+      { name: "Live app preview", status: "real", req: true, desc: "Sandpack runs the generated React and Tailwind app in the browser, with device sizes and open-in-new-tab." },
+      { name: "Select to edit", status: "real", req: true, desc: "Click any element in the preview and say how it should change; the request carries the exact element." },
+      { name: "Code editor and diffs", status: "real", req: true, desc: "Monaco editor with diffs against the previous version; manual edits become checkpoints." },
+      { name: "Checkpoints and restore", status: "real", desc: "Every AI change and manual edit is a checkpoint. Restoring is one click and never deletes history." },
+      { name: "Auto-fix", status: "real", desc: "When the preview throws an error, one click sends it back to the model to repair." },
+      { name: "Demo mode", status: "real", desc: "Without a model key, the build flow is scripted so a demo never breaks." },
+    ]},
+    { code: "C", title: "Agents", blurb: "Design the app's agent from blocks, test it, and check it keeps behaving.", items: [
+      { name: "Agent canvas", status: "real", req: true, desc: "React Flow canvas with Trigger, Brain, Action, Knowledge, Memory, Rules and Output blocks, per-block settings and autosave." },
+      { name: "Test console with trace", status: "real", desc: "Run the agent and see every step: model calls, tools, retrieved passages, rules, tokens and latency." },
+      { name: "Web search", status: "partial", desc: "Anthropic server-side web search when the agent runs on Claude; simulated when it runs on OpenAI." },
+      { name: "Post to Slack", status: "real", desc: "Save an incoming webhook URL in the Action block and the agent posts for real; the trace shows it as live. Only <code>hooks.slack.com</code> URLs are accepted." },
+      { name: "Email, CRM, ticket, SQL and HTTP tools", status: "sim", desc: "Realistic responses, labelled “simulated” in the trace." },
+      { name: "Knowledge files", status: "real", desc: "Upload PDF, TXT or Markdown. Text is extracted per page, split into passages and ranked per question; answers cite file and page." },
+      { name: "PII redaction", status: "real", desc: "Masks emails, phone numbers and card numbers in replies before they're shown." },
+      { name: "Evals", status: "real", desc: "Saved tests per agent: contains, doesn't contain, or AI judge. Run all streams verdicts with progress and keeps pass-rate history. Save as test from any console run." },
+      { name: "Framework code", status: "gen", desc: "LangGraph, CrewAI, OpenAI Agents SDK, Claude Agent SDK, Google ADK and Lyzr blueprint starter code, kept in sync with the canvas. Not run by the platform." },
+    ]},
+    { code: "D", title: "Shipping", blurb: "Put the app and its agent in front of people.", items: [
+      { name: "Deployment", status: "real", req: true, desc: "Freezes a checkpoint to a public <code>/s/&lt;slug&gt;</code> link with a QR code. Preview and production, with one-click rollback." },
+      { name: "GitHub integration", status: "real", req: true, desc: "Import a repo with stack and AI-library detection, push to a new repo, or open a real pull request (branch, commit, PR)." },
+      { name: "Agent API", status: "real", desc: "Per-agent keys shown once and stored as hashes; <code>POST /api/v1/agents/:id/run</code> returns output, trace, tokens and latency. 60 requests a minute per key; revoking takes effect immediately." },
+      { name: "Project thumbnails", status: "real", desc: "The preview renders itself to an image after each new version; dashboard cards show it." },
+      { name: "Custom domains", status: "mock", desc: "Saved and shown as “waiting for DNS”; DNS is not checked." },
+      { name: "Team invites", status: "soon", desc: "Labelled in the UI." },
+    ]},
+    { code: "E", title: "Platform", blurb: "Usage, measurement and safety underneath everything.", items: [
+      { name: "Credits and usage", status: "real", desc: "100 credits a day, refilled and spent only through database functions, so the browser can't change a balance. Token and latency charts from real runs." },
+      { name: "Product metrics", status: "real", desc: "Server-side events feed an admin <code>/metrics</code> page: activation funnel, plan approval rate, restores per project, mode switches, and weekly deployed apps (the North Star)." },
+      { name: "Security", status: "real", desc: "Row-level security everywhere; GitHub tokens, env vars and model keys encrypted with AES-256-GCM; same-site redirects only; generated apps run in a cross-origin sandbox." },
+      { name: "Pricing page", status: "mock", desc: "Illustrative plans." },
+    ]},
+  ];
+
+  const all = GROUPS.flatMap((g) => g.items);
+  document.getElementById("m-total").textContent = all.length;
+  document.getElementById("m-real").textContent = all.filter((i) => i.status === "real").length;
+
+  let active = "all";
+  try { active = localStorage.getItem("fs-filter") || "all"; } catch (e) {}
+  if (active !== "all" && !STATUS[active]) active = "all";
+
+  const chips = document.getElementById("chips");
+  const counts = Object.fromEntries(Object.keys(STATUS).map((k) => [k, all.filter((i) => i.status === k).length]));
+  const chipDefs = [["all", "All", all.length], ...Object.entries(STATUS).filter(([k]) => counts[k]).map(([k, s]) => [k, s.label, counts[k]])];
+  chips.innerHTML = chipDefs.map(([k, label, n]) =>
+    `<button type="button" class="chip" data-k="${k}" aria-pressed="${k === active}">${k === "all" ? "" : `<span class="status ${STATUS[k].cls}" style="padding:0;background:none;border:0"></span>`}${label}<span class="n">${n}</span></button>`
+  ).join("");
+  chips.addEventListener("click", (e) => {
+    const b = e.target.closest(".chip");
+    if (!b) return;
+    active = b.dataset.k;
+    try { localStorage.setItem("fs-filter", active); } catch (err) {}
+    chips.querySelectorAll(".chip").forEach((c) => c.setAttribute("aria-pressed", String(c.dataset.k === active)));
+    render();
+  });
+
+  const q = document.getElementById("q");
+  q.addEventListener("input", render);
+
+  const strip = (html) => html.replace(/<[^>]+>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+
+  function render() {
+    const term = q.value.trim().toLowerCase();
+    let ref = 0;
+    document.getElementById("groups").innerHTML = GROUPS.map((g) => {
+      const rows = g.items.map((item, i) => ({ ...item, ref: `${g.code}.${String(i + 1).padStart(2, "0")}` }))
+        .filter((i) => (active === "all" || i.status === active) && (!term || (i.name + " " + strip(i.desc)).toLowerCase().includes(term)));
+      if (!rows.length) return "";
+      ref += rows.length;
+      return `<section class="group" aria-labelledby="g-${g.code}">
+        <div class="group-head"><span class="code">${g.code}</span><h2 id="g-${g.code}">${g.title}</h2><p>${g.blurb}</p></div>
+        <ul class="rows">${rows.map((i) => `<li class="row">
+          <span class="ref">${i.ref}</span>
+          <span class="name">${i.name}${i.req ? `<br><span class="req">Challenge area</span>` : ""}</span>
+          <span class="status ${STATUS[i.status].cls}">${STATUS[i.status].label}</span>
+          <span class="desc">${i.desc}</span>
+        </li>`).join("")}</ul>
+      </section>`;
+    }).join("") || `<section class="group"><p class="empty">No features match “${q.value.replace(/[<>&"]/g, "")}”.</p></section>`;
+  }
+  render();
+</script>
