@@ -14,8 +14,10 @@ import {
   Plus,
   Rocket,
   Settings,
+  Store,
   Zap,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
 import { ThemeToggle } from "./theme-toggle";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -34,14 +36,17 @@ import { signOut } from "@/app/(auth)/actions";
 import { DAILY_CREDITS } from "@/lib/credits";
 import { cn } from "@/lib/utils";
 
-const NAV = [
+type NavItem = { href: string; label: string; icon: LucideIcon; soon?: boolean };
+
+const NAV: NavItem[] = [
   { href: "/dashboard", label: "Home", icon: House },
   { href: "/projects", label: "Projects", icon: FolderKanban },
-  { href: "/dashboard#templates", label: "Templates", icon: LayoutTemplate },
+  { href: "/templates", label: "Templates", icon: LayoutTemplate },
+  { href: "/marketplace", label: "Marketplace", icon: Store },
   { href: "/agents", label: "Agents", icon: Bot },
   { href: "/deployments", label: "Deployments", icon: Rocket },
-  { href: "/import", label: "Import repo", icon: FolderGit2 },
-  { href: "/integrations", label: "Integrations", icon: Boxes, soon: true },
+  { href: "/import", label: "Import project", icon: FolderGit2 },
+  { href: "/integrations", label: "Integrations", icon: Boxes },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -77,7 +82,7 @@ export function Sidebar({ user }: { user: SidebarUser }) {
 
       <nav className="mt-4 flex flex-col gap-0.5">
         {[...NAV, ...(user.isAdmin ? [{ href: "/metrics", label: "Metrics", icon: BarChart3 }] : [])].map(({ href, label, icon: Icon, ...rest }) => {
-          const soon = "soon" in rest && rest.soon;
+          const soon = "soon" in rest && !!(rest as { soon?: boolean }).soon;
           const active = !soon && pathname === href.split("#")[0] && !href.includes("#");
           const item = (
             <span

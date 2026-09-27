@@ -19,7 +19,8 @@ export type EventName =
   | "deployed"
   | "pr_opened"
   | "project_duplicated"
-  | "project_deleted";
+  | "project_deleted"
+  | "webhook_created";
 
 /** Record a product event. Never throws — analytics must not break the product. */
 export async function track(
