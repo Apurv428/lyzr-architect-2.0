@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
   ArrowRight,
+  Ban,
   Bot,
   Check,
   Code2,
@@ -23,6 +24,13 @@ const STEPS = [
   { icon: ListChecks, title: "Approve the plan", body: "Screens, data, agent steps and rules — reviewed before any code is written." },
   { icon: MousePointerClick, title: "Refine live", body: "Click anything in the preview to change it. Every change is a checkpoint." },
   { icon: Rocket, title: "Ship", body: "One-click deploy to a public link, or open a pull request to your repo." },
+];
+
+const NOT_LIST = [
+  { title: "Not a general-purpose IDE", body: "Architect generates and ships agentic apps. It won't replace VS Code for everyday coding or maintain large existing codebases." },
+  { title: "Not a CI/CD pipeline", body: "Deployments are one-click app links. For branch protection and test gates, connect your existing CI." },
+  { title: "Not a model fine-tuning tool", body: "Architect configures how models behave — it doesn't train them. Bring a fine-tuned model from anywhere and wire it in as a provider." },
+  { title: "Not a drag-and-drop builder", body: "Architect writes real, exportable code. No proprietary block format — export to GitHub and keep coding in any editor." },
 ];
 
 const FEATURES = [
@@ -65,7 +73,8 @@ export default function Home() {
             <br className="hidden sm:block" /> Ship the agent.
           </h1>
           <p className="mx-auto max-w-2xl text-lg text-muted-foreground">
-            Architect builds full-stack agentic apps from a prompt — guided when you want help, raw code when you want control.
+            See the plan before a line is written. Read what changed and why, every time.{" "}
+            Architect turns a prompt into a deployed agentic app — guided when you need it, raw code when you want it.
           </p>
           <HeroPrompt />
         </section>
@@ -135,6 +144,23 @@ export default function Home() {
           </div>
         </section>
 
+        <section className="mx-auto max-w-6xl px-4 pb-24 sm:px-8">
+          <div className="rounded-2xl border bg-card/60 p-8">
+            <div className="mb-6 flex items-center gap-2">
+              <Ban className="size-4 text-muted-foreground" />
+              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">What Architect is not</p>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              {NOT_LIST.map(({ title, body }) => (
+                <div key={title} className="rounded-xl border bg-background/50 p-4">
+                  <p className="font-medium text-sm">{title}</p>
+                  <p className="mt-1 text-xs text-muted-foreground leading-relaxed">{body}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
         <section className="mx-auto max-w-4xl px-4 pb-24 text-center">
           <div className="glow rounded-2xl border bg-card/70 px-6 py-12">
             <h2 className="text-3xl font-semibold tracking-tight">Your first agent is five minutes away.</h2>
@@ -147,7 +173,7 @@ export default function Home() {
       </main>
 
       <footer className="border-t py-8 text-center text-xs text-muted-foreground">
-        Architect 2.0 — a concept built for the Lyzr hiring challenge.
+        Architect 2.0 — build and deploy AI agents without writing a line of code.
       </footer>
     </div>
   );
