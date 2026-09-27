@@ -22,6 +22,16 @@ const LivePreview = dynamic(() => import("@/components/preview/live-preview").th
   ),
 });
 
+const WebContainerPreview = dynamic(
+  () => import("@/components/preview/webcontainer-preview").then((m) => m.WebContainerPreview),
+  { ssr: false, loading: () => <div className="flex h-full items-center justify-center text-sm text-muted-foreground"><Loader2 className="mr-2 size-4 animate-spin" /> Booting WebContainer…</div> },
+);
+
+const E2BPreview = dynamic(
+  () => import("@/components/preview/webcontainer-preview").then((m) => m.E2BPreview),
+  { ssr: false, loading: () => <div className="flex h-full items-center justify-center text-sm text-muted-foreground"><Loader2 className="mr-2 size-4 animate-spin" /> Starting sandbox…</div> },
+);
+
 const DEVICES: { id: Device; icon: typeof Monitor; label: string; width: string }[] = [
   { id: "desktop", icon: Monitor, label: "Desktop", width: "100%" },
   { id: "tablet", icon: Tablet, label: "Tablet", width: "820px" },
@@ -93,6 +103,7 @@ export function PreviewTab() {
   const selectMode = useWorkspace((s) => s.selectMode);
   const selection = useWorkspace((s) => s.selection);
   const previewKey = useWorkspace((s) => s.previewKey);
+  const previewRuntime = useWorkspace((s) => s.previewRuntime);
   const { send } = useChat();
   const hasFiles = Object.keys(files).length > 0;
 
@@ -171,15 +182,28 @@ export function PreviewTab() {
           </Tooltip>
         ))}
         <div className="mx-1 h-4 w-px bg-border" />
-        <Button
-          size="xs"
-          data-tour="select"
-          variant={selectMode ? "default" : "ghost"}
-          onClick={() => useWorkspace.getState().set({ selectMode: !selectMode, selection: null })}
-        >
-          <MousePointerClick /> {selectMode ? "Click an element…" : "Select to edit"}
-        </Button>
+        {previewRuntime === "sandpack" && (
+          <Button
+            size="xs"
+            data-tour="select"
+            variant={selectMode ? "default" : "ghost"}
+            onClick={() => useWorkspace.getState().set({ selectMode: !selectMode, selection: null })}
+          >
+            <MousePointerClick /> {selectMode ? "Click an element…" : "Select to edit"}
+          </Button>
+        )}
         <div className="ml-auto flex items-center gap-1">
+          {/* Runtime switcher */}
+          <select
+            value={previewRuntime}
+            onChange={(e) => useWorkspace.getState().set({ previewRuntime: e.target.value as typeof previewRuntime })}
+            className="h-6 rounded border bg-background px-1.5 text-[11px] text-muted-foreground"
+            title="Preview runtime"
+          >
+            <option value="sandpack">Sandpack (React)</option>
+            <option value="webcontainer">WebContainer</option>
+            <option value="e2b">E2B Sandbox</option>
+          </select>
           <Tooltip>
             <TooltipTrigger
               render={
@@ -206,26 +230,34 @@ export function PreviewTab() {
         </div>
       </div>
 
-      <div className={cn("relative min-h-0 flex-1", device !== "desktop" && "bg-grid flex justify-center overflow-auto p-4")}>
+      <div className={cn("relative min-h-0 flex-1", device !== "desktop" && previewRuntime === "sandpack" && "bg-grid flex justify-center overflow-auto p-4")}>
         <div
           className={cn(
             "relative h-full overflow-hidden bg-white transition-all duration-300",
-            device !== "desktop" && "rounded-2xl border-4 border-zinc-800 shadow-2xl",
+            device !== "desktop" && previewRuntime === "sandpack" && "rounded-2xl border-4 border-zinc-800 shadow-2xl",
             flash && "ring-2 ring-primary ring-offset-2 ring-offset-background",
-            selectMode && "ring-2 ring-primary/70",
+            selectMode && previewRuntime === "sandpack" && "ring-2 ring-primary/70",
           )}
-          style={{ width, maxWidth: "100%" }}
+          style={{ width: previewRuntime === "sandpack" ? width : "100%", maxWidth: "100%" }}
         >
-          <LivePreview
-            key={`${checkpointId}-${previewKey}`}
-            files={files}
-            selectMode={selectMode}
-            onSelect={onSelect}
-            onAutoFix={streaming ? undefined : onAutoFix}
-            onCapture={needsThumbnail ? onCapture : undefined}
-          />
+          {previewRuntime === "sandpack" && (
+            <LivePreview
+              key={`${checkpointId}-${previewKey}`}
+              files={files}
+              selectMode={selectMode}
+              onSelect={onSelect}
+              onAutoFix={streaming ? undefined : onAutoFix}
+              onCapture={needsThumbnail ? onCapture : undefined}
+            />
+          )}
+          {previewRuntime === "webcontainer" && (
+            <WebContainerPreview key={`wc-${checkpointId}-${previewKey}`} files={files} projectId={projectId} />
+          )}
+          {previewRuntime === "e2b" && (
+            <E2BPreview key={`e2b-${checkpointId}-${previewKey}`} files={files} projectId={projectId} />
+          )}
         </div>
-        <AnimatePresence>{selection && <SelectionPrompt selection={selection} />}</AnimatePresence>
+        <AnimatePresence>{selection && previewRuntime === "sandpack" && <SelectionPrompt selection={selection} />}</AnimatePresence>
       </div>
     </div>
   );

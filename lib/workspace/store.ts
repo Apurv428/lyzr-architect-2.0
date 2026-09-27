@@ -9,6 +9,7 @@ import type { Mode } from "@/lib/types";
 
 export type Tab = "preview" | "code" | "agent" | "data" | "deploy";
 export type Device = "desktop" | "tablet" | "mobile";
+export type PreviewRuntime = "sandpack" | "webcontainer" | "e2b";
 
 type WorkspaceState = {
   projectId: string;
@@ -31,6 +32,7 @@ type WorkspaceState = {
   dialog: "deploy" | "publish" | "invite" | null;
   /** Bumped after a deploy so the Deploy tab refetches. */
   deployVersion: number;
+  previewRuntime: PreviewRuntime;
   streaming: boolean;
   liveText: string;
   status: string | null;
@@ -67,6 +69,7 @@ export const useWorkspace = create<WorkspaceState & WorkspaceActions>((set) => (
   previewKey: 0,
   dialog: null,
   deployVersion: 0,
+  previewRuntime: "sandpack",
   streaming: false,
   liveText: "",
   status: null,
