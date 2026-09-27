@@ -55,3 +55,53 @@ export async function deleteEvalCase(id: string) {
   const { error } = await supabase.from("eval_cases").delete().eq("id", id);
   return error ? { error: "Couldn't delete the test." } : { ok: true as const };
 }
+
+// ── Suggested evals from real traffic ────────────────────────────────────────
+
+export type SuggestedTest = {
+  id: string;
+  agent_id: string;
+  run_id: string;
+  input: string;
+  output: string;
+  status: "pending" | "accepted" | "rejected";
+  created_at: string;
+};
+
+export async function listSuggestions(agentId: string): Promise<SuggestedTest[]> {
+  const { supabase } = await getUser();
+  const { data } = await supabase
+    .from("suggested_eval_tests")
+    .select("id, agent_id, run_id, input, output, status, created_at")
+    .eq("agent_id", agentId)
+    .eq("status", "pending")
+    .order("created_at", { ascending: false })
+    .limit(50);
+  return (data ?? []) as SuggestedTest[];
+}
+
+export async function acceptSuggestion(
+  suggestionId: string,
+  agentId: string,
+  c: { kind: EvalKind; expectation: string },
+) {
+  const { supabase } = await getUser();
+  const { data: s } = await supabase
+    .from("suggested_eval_tests")
+    .select("input")
+    .eq("id", suggestionId)
+    .single();
+  if (!s) return { error: "Suggestion not found." };
+
+  const res = await addEvalCase(agentId, { input: s.input, ...c });
+  if ("error" in res) return res;
+
+  await supabase.from("suggested_eval_tests").update({ status: "accepted" }).eq("id", suggestionId);
+  return { case: res.case };
+}
+
+export async function dismissSuggestion(id: string) {
+  const { supabase } = await getUser();
+  const { error } = await supabase.from("suggested_eval_tests").update({ status: "rejected" }).eq("id", id);
+  return error ? { error: "Couldn't dismiss the suggestion." } : { ok: true as const };
+}

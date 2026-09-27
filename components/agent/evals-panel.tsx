@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, CircleDashed, ListChecks, Loader2, Minus, Play, Plus, RotateCw, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, CircleDashed, ListChecks, Loader2, Minus, Play, Plus, RotateCw, Sparkles, ThumbsDown, ThumbsUp, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { addEvalCase, deleteEvalCase, listEvals, updateEvalCase } from "@/lib/actions/evals";
+import { acceptSuggestion, addEvalCase, deleteEvalCase, dismissSuggestion, listEvals, listSuggestions, updateEvalCase, type SuggestedTest } from "@/lib/actions/evals";
 import { KIND_LABEL, type EvalCase, type EvalEvent, type EvalKind, type EvalResult, type EvalRunSummary } from "@/lib/agent/evals";
 import { useAgentUi } from "@/lib/agent/use-agent";
 import { timeAgo } from "@/lib/time";
@@ -188,14 +188,83 @@ function NewCase({ guided, onAdd, disabled }: { guided: boolean; onAdd: (c: { in
   );
 }
 
+function SuggestionsTab({ agentId, guided, onAccepted }: { agentId: string; guided: boolean; onAccepted: () => void }) {
+  const [suggestions, setSuggestions] = useState<SuggestedTest[] | null>(null);
+  const [accepting, setAccepting] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    listSuggestions(agentId).then((s) => { if (alive) setSuggestions(s); });
+    return () => { alive = false; };
+  }, [agentId]);
+
+  async function accept(s: SuggestedTest) {
+    setAccepting(s.id);
+    const res = await acceptSuggestion(s.id, agentId, { kind: "judge", expectation: "" });
+    if ("error" in res) { toast.error(res.error); }
+    else {
+      setSuggestions((prev) => prev?.filter((x) => x.id !== s.id) ?? null);
+      toast.success("Added as test — set the expectation in the Tests tab.");
+      onAccepted();
+    }
+    setAccepting(null);
+  }
+
+  async function dismiss(id: string) {
+    setSuggestions((prev) => prev?.filter((x) => x.id !== id) ?? null);
+    const res = await dismissSuggestion(id);
+    if ("error" in res) toast.error(res.error);
+  }
+
+  if (!suggestions) {
+    return <p className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> Loading…</p>;
+  }
+
+  if (!suggestions.length) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
+        <Sparkles className="size-8 text-muted-foreground/40" />
+        <p>No suggestions yet.</p>
+        <p className="text-xs">After real API runs come in, 1-in-10 will appear here for you to promote into tests.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 space-y-3 overflow-y-auto p-3">
+      <p className="text-xs text-muted-foreground">Sampled from real API traffic. Accept to add as a test, or dismiss to hide.</p>
+      <ul className="space-y-3">
+        {suggestions.map((s) => (
+          <li key={s.id} className="space-y-2 rounded-xl border bg-card/60 p-3">
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{guided ? "User said" : "Input"}</p>
+            <p className="text-sm">{s.input.slice(0, 300)}{s.input.length > 300 ? "…" : ""}</p>
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{guided ? "Agent replied" : "Output"}</p>
+            <p className="max-h-24 overflow-y-auto text-xs text-muted-foreground">{s.output.slice(0, 400)}{s.output.length > 400 ? "…" : ""}</p>
+            <div className="flex gap-2 pt-1">
+              <Button size="sm" variant="outline" className="flex-1" onClick={() => accept(s)} disabled={accepting === s.id}>
+                {accepting === s.id ? <Loader2 className="animate-spin" /> : <ThumbsUp />} Add as test
+              </Button>
+              <Button size="icon-sm" variant="ghost" onClick={() => dismiss(s.id)} aria-label="Dismiss">
+                <ThumbsDown />
+              </Button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function EvalsPanel() {
   const agent = useWorkspace((s) => s.agent)!;
   const guided = useWorkspace((s) => s.mode) === "guided";
   const version = useAgentUi((s) => s.evalsVersion);
+  const [tab, setTab] = useState<"tests" | "suggested">("tests");
   const [data, setData] = useState<{ cases: EvalCase[]; runs: EvalRunSummary[] } | null>(null);
   const [status, setStatus] = useState<Record<string, Status>>({});
   const [running, setRunning] = useState<{ done: number; total: number } | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [suggestedCount, setSuggestedCount] = useState<number | null>(null);
   const saves = useRef(new Set<Promise<unknown>>());
 
   useEffect(() => {
@@ -205,6 +274,7 @@ export function EvalsPanel() {
       setData({ cases: d.cases, runs: d.runs });
       setStatus(Object.fromEntries(d.latest.filter((r) => d.cases.some((c) => c.id === r.case_id)).map((r) => [r.case_id, { state: "done", result: r }])));
     });
+    listSuggestions(agent.id).then((s) => { if (alive) setSuggestedCount(s.length); });
     return () => {
       alive = false;
     };
@@ -292,13 +362,37 @@ export function EvalsPanel() {
   return (
     <aside className="flex w-96 shrink-0 flex-col border-l bg-background" data-tour="evals">
       <div className="flex h-10 items-center gap-2 border-b px-3">
-        <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{guided ? "Checks" : "Evals"}</span>
+        <div className="flex gap-1">
+          <button
+            onClick={() => setTab("tests")}
+            className={cn("rounded px-2 py-1 text-xs font-medium transition", tab === "tests" ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground")}
+          >
+            {guided ? "Checks" : "Tests"}
+          </button>
+          <button
+            onClick={() => setTab("suggested")}
+            className={cn("relative rounded px-2 py-1 text-xs font-medium transition", tab === "suggested" ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground")}
+          >
+            Suggested
+            {!!suggestedCount && (
+              <span className="absolute -right-0.5 -top-0.5 flex size-3.5 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground">
+                {suggestedCount > 9 ? "9+" : suggestedCount}
+              </span>
+            )}
+          </button>
+        </div>
         <Button size="icon-xs" variant="ghost" className="ml-auto" aria-label="Close" onClick={() => useAgentUi.getState().set({ panel: null })}>
           <X />
         </Button>
       </div>
 
-      {!data ? (
+      {tab === "suggested" ? (
+        <SuggestionsTab
+          agentId={agent.id}
+          guided={guided}
+          onAccepted={() => { setSuggestedCount((n) => Math.max(0, (n ?? 1) - 1)); setTab("tests"); }}
+        />
+      ) : !data ? (
         <p className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> Loading…</p>
       ) : (
         <>
