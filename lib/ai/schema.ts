@@ -37,20 +37,29 @@ export const QuestionsSchema = z.object({
 });
 export type Questions = z.infer<typeof QuestionsSchema>;
 
-export const WriteFilesSchema = z.object({
-  checkpoint_label: z.string().min(1),
-  summary: z.array(z.string()).min(1),
-  files: z
-    .array(
-      z.object({
-        path: z.string().regex(/^\/[\w\-./]+\.(tsx|ts|css)$/, "path must look like /App.tsx"),
-        content: z.string(),
-      }),
-    )
-    .min(1),
-  deleted: z.array(z.string()).optional(),
-  next_suggestions: z.array(z.string()).max(4),
-});
+// Files are strict. The descriptive fields get fallbacks, because some OpenAI-compatible providers
+// (Gemini) leave out "required" fields that only describe the change.
+export const WriteFilesSchema = z
+  .object({
+    checkpoint_label: z.string().optional(),
+    summary: z.array(z.string()).optional(),
+    files: z
+      .array(
+        z.object({
+          path: z.string().regex(/^\/[\w\-./]+\.(tsx|ts|css)$/, "path must look like /App.tsx"),
+          content: z.string(),
+        }),
+      )
+      .min(1),
+    deleted: z.array(z.string()).optional(),
+    next_suggestions: z.array(z.string()).optional(),
+  })
+  .transform((w) => ({
+    ...w,
+    checkpoint_label: w.checkpoint_label?.trim() || "Updated the app",
+    summary: w.summary?.length ? w.summary : w.files.map((f) => `Updated ${f.path}`),
+    next_suggestions: (w.next_suggestions ?? []).slice(0, 4),
+  }));
 export type WriteFiles = z.infer<typeof WriteFilesSchema>;
 
 // ── Persisted chat messages ──

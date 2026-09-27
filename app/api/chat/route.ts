@@ -7,7 +7,7 @@ import { SYSTEM_PROMPT, TOOLS } from "@/lib/ai/prompt";
 import { loadAttachments, toClaudeBlocks, toOpenAIParts } from "@/lib/ai/attachments";
 import { resolveProvider, userAI, type ResolvedProvider } from "@/lib/ai/keys";
 import { MAX_ATTACHMENTS, activeAttachments } from "@/lib/attachments";
-import { CLAUDE_MODEL, OPENAI_MODEL, supportsReasoningEffort, toOpenAITools } from "@/lib/ai/provider";
+import { CLAUDE_MODEL, isOutOfCredits, openaiClient, openaiModelFor, supportsReasoningEffort, toOpenAITools } from "@/lib/ai/provider";
 import {
   PlanSchema,
   QuestionsSchema,
@@ -358,7 +358,8 @@ async function applyToolCall(turn: Turn, name: string, input: unknown): Promise<
 
 async function runOpenAITurn(turn: Turn): Promise<boolean> {
   const { send, project } = turn;
-  const client = new OpenAI(turn.llm.apiKey ? { apiKey: turn.llm.apiKey } : {});
+  const client = openaiClient(turn.llm.apiKey);
+  const model = openaiModelFor(Boolean(turn.llm.apiKey));
   const files = await loadAttachments(turn.supabase, turn.userId, activeAttachments(turn.history));
   if (files.length) send({ t: "status", label: `Reading ${files.length === 1 ? files[0].name : `${files.length} attachments`}…` });
 
@@ -377,12 +378,19 @@ async function runOpenAITurn(turn: Turn): Promise<boolean> {
   try {
     const stream = await client.chat.completions.create(
       {
-        model: OPENAI_MODEL,
+        model,
         messages,
         tools: toOpenAITools(TOOLS),
         stream: true,
         max_completion_tokens: 32000,
-        ...(supportsReasoningEffort(OPENAI_MODEL) ? { reasoning_effort: turn.action === "approve" ? ("medium" as const) : ("low" as const) } : {}),
+        ...(supportsReasoningEffort(model) ? { reasoning_effort: turn.action === "approve" ? ("medium" as const) : ("low" as const) } : {}),
+        // Some OpenAI-compatible models (Gemini) announce "building now…" and end the turn without the call.
+        // An approval always means a build, and a new project always starts with questions or a plan.
+        ...(turn.action === "approve"
+          ? { tool_choice: { type: "function" as const, function: { name: "write_files" } } }
+          : turn.action === "start"
+            ? { tool_choice: "required" as const }
+            : {}),
       },
       { signal: turn.signal },
     );
@@ -397,7 +405,9 @@ async function runOpenAITurn(turn: Turn): Promise<boolean> {
         send({ t: "text", delta: delta.content });
       }
       for (const tc of delta?.tool_calls ?? []) {
-        const call = (calls[tc.index] ??= { name: "", args: "" });
+        // Some OpenAI-compatible providers (Gemini) omit `index`; a delta that names a function starts a new call.
+        const index = tc.index ?? (tc.function?.name || !calls.length ? calls.length : calls.length - 1);
+        const call = (calls[index] ??= { name: "", args: "" });
         if (tc.function?.name) {
           call.name += tc.function.name;
           send({ t: "status", label: call.name === "propose_plan" ? "Drafting the plan…" : call.name === "ask_questions" ? "Preparing a few questions…" : "Writing code…" });
@@ -418,6 +428,11 @@ async function runOpenAITurn(turn: Turn): Promise<boolean> {
     if (err instanceof OpenAI.AuthenticationError) {
       console.warn("[chat] OpenAI auth failed — falling back to demo mode");
       return runDemoTurn(turn);
+    }
+    // Checked before RateLimitError: an empty balance is also a 429, but retrying never helps.
+    if (isOutOfCredits(err)) {
+      console.warn("[chat] OpenAI account is out of credits — falling back to demo mode");
+      return runDemoTurn(turn, "Heads up: the AI service is out of credits right now, so this is a scripted demo build. Add your own model key in Settings to build with real AI.");
     }
     if (err instanceof OpenAI.RateLimitError) {
       await failTurn(turn, "Architect is busy right now. Give it a few seconds and retry.");
@@ -462,9 +477,11 @@ async function streamText(turn: Turn, text: string) {
   await insertMessage(turn, { role: "assistant", kind: "text", content: text, data: null });
 }
 
-async function runDemoTurn(turn: Turn): Promise<boolean> {
+async function runDemoTurn(turn: Turn, notice?: string): Promise<boolean> {
   const { project, action, send } = turn;
   const latestPlan = [...turn.history].reverse().find((m) => m.kind === "plan")?.data as Plan | undefined;
+
+  if (notice) await streamText(turn, notice);
 
   if (activeAttachments(turn.history)?.length && action !== "approve") {
     await streamText(turn, "Heads up: demo mode can't read attachments, so I'll plan from your text. Add an Anthropic or OpenAI key to build straight from a screenshot or spec.");
