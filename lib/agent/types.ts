@@ -1,6 +1,6 @@
 import type { Mode } from "@/lib/types";
 
-export type NodeKind = "trigger" | "llm" | "tool" | "knowledge" | "memory" | "guardrail" | "output";
+export type NodeKind = "trigger" | "llm" | "tool" | "knowledge" | "memory" | "guardrail" | "output" | "manager" | "subagent";
 
 export type AgentNodeData = {
   kind: NodeKind;
@@ -30,6 +30,8 @@ export const KIND_META: Record<NodeKind, { guided: string; pro: string; hint: st
   memory: { guided: "Remembers", pro: "Memory", hint: "What it keeps between chats", color: "text-teal-600 dark:text-teal-400 bg-teal-500/15" },
   guardrail: { guided: "Rules", pro: "Guardrails", hint: "Lines it must never cross", color: "text-rose-600 dark:text-rose-400 bg-rose-500/15" },
   output: { guided: "Replies with", pro: "Output", hint: "How results are delivered", color: "text-emerald-600 dark:text-emerald-400 bg-emerald-500/15" },
+  manager: { guided: "Coordinator", pro: "Manager", hint: "Splits the task between specialists", color: "text-orange-600 dark:text-orange-400 bg-orange-500/15" },
+  subagent: { guided: "Specialist", pro: "Sub-agent", hint: "A linked agent this coordinator can call", color: "text-indigo-600 dark:text-indigo-400 bg-indigo-500/15" },
 };
 
 export const kindLabel = (kind: NodeKind, mode: Mode) => KIND_META[kind][mode];
@@ -65,4 +67,6 @@ export const DEFAULT_CONFIG: Record<NodeKind, AgentNodeData["config"]> = {
   memory: { scope: "Conversation" },
   guardrail: { rules: [], redactPII: true },
   output: { format: "Chat reply" },
+  manager: { strategy: "auto", maxCalls: "4" },
+  subagent: { agentId: "", label: "" },
 };

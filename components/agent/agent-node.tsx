@@ -1,7 +1,7 @@
 "use client";
 
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
-import { BookOpen, Bot, Brain, Globe, MessageSquareReply, ShieldCheck, Wrench, Zap } from "lucide-react";
+import { BookOpen, Bot, Brain, Globe, MessageSquareReply, Network, ShieldCheck, Users, Wrench, Zap } from "lucide-react";
 import { KIND_META, MODELS, TOOL_CATALOG, type AgentNodeData, type NodeKind } from "@/lib/agent/types";
 import { useWorkspace } from "@/lib/workspace/store";
 import { cn } from "@/lib/utils";
@@ -14,6 +14,8 @@ export const KIND_ICON: Record<NodeKind, typeof Bot> = {
   memory: Brain,
   guardrail: ShieldCheck,
   output: MessageSquareReply,
+  manager: Network,
+  subagent: Users,
 };
 
 function summary(data: AgentNodeData) {

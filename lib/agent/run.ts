@@ -2,7 +2,13 @@ import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import { redact, systemPrompt, type AgentSpec } from "@/lib/agent/compile";
-import { chunkDocs, describeSources, rank, type Passage } from "@/lib/agent/retrieval";
+import { chunkDocs, describeSources, rank, type HybridOptions, type Passage } from "@/lib/agent/retrieval";
+import { embedText } from "@/lib/agent/embed";
+import { resolveConnector } from "@/lib/agent/connectors";
+import { postSlackMessage } from "@/lib/agent/connectors/slack";
+import { sendGmail } from "@/lib/agent/connectors/gmail";
+import { upsertContact } from "@/lib/agent/connectors/hubspot";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { MODELS, TOOL_CATALOG } from "@/lib/agent/types";
 import type { TraceStep } from "@/lib/agent/trace";
 import type { ResolvedProvider } from "@/lib/ai/keys";
@@ -23,6 +29,17 @@ export type RunOptions = {
   /** Loads uploaded knowledge files; only called when a Knowledge block is connected. */
   loadDocs?: () => Promise<KnowledgeDoc[]>;
   onStep?: (step: TraceStep) => void;
+  /** Decrypted Slack incoming webhook URL for the project. When present, slack_message POSTs for real. */
+  slackWebhookUrl?: string;
+  /**
+   * When provided, retrieval uses hybrid BM25 + pgvector search (RRF-fused).
+   * Pass the authenticated Supabase client and the agent id.
+   */
+  supabase?: SupabaseClient;
+  /** Agent DB id — used for hybrid vector search. */
+  agentId?: string;
+  /** Project DB id — used to resolve OAuth connectors. */
+  projectId?: string;
 };
 
 export type RunResult = {
@@ -50,7 +67,134 @@ export function describeRunError(err: unknown) {
   return "The agent run failed.";
 }
 
-export async function runAgent({ spec: compiled, input, history, llm, loadDocs, onStep }: RunOptions): Promise<RunResult> {
+/**
+ * Supervisor pattern: the manager LLM decides which sub-agent to call, up to maxCalls times,
+ * collecting their outputs before producing a final answer.
+ */
+async function runSupervisor(
+  spec: AgentSpec,
+  input: string,
+  history: HistoryTurn[],
+  llm: ResolvedProvider,
+  subAgentSpecs: Array<{ ref: AgentSpec["subAgents"][0]; spec: AgentSpec }>,
+  onStep: StepFn,
+): Promise<{ text: string; tokens: number }> {
+  if (!subAgentSpecs.length) return { text: "(No sub-agents configured)", tokens: 0 };
+
+  const subList = subAgentSpecs.map((s, i) => `${i + 1}. ${s.ref.label || s.spec.name}: ${s.spec.instructions.slice(0, 120)}`).join("\n");
+  const managerSystem = `You are a coordinator agent. Given a user request, call the appropriate specialist agents one at a time using the delegate tool, then synthesise their outputs into a final answer.\n\nAvailable specialists:\n${subList}`;
+
+  const client = llm.provider === "openai" ? new OpenAI({ apiKey: llm.apiKey }) : null;
+  const anthropic = llm.provider === "anthropic" ? new Anthropic({ apiKey: llm.apiKey }) : null;
+
+  const delegateTool = {
+    name: "delegate",
+    description: "Call a specialist agent with an input message. Returns the specialist's reply.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        specialist_index: { type: "number", description: "1-based index from the specialist list" },
+        input: { type: "string", description: "The message to send to the specialist" },
+      },
+      required: ["specialist_index", "input"],
+    },
+  };
+
+  const messages: Anthropic.MessageParam[] = [
+    ...history.map((h) => ({ role: h.role as "user" | "assistant", content: h.content })),
+    { role: "user", content: input },
+  ];
+
+  let totalTokens = 0;
+  let callsLeft = spec.managerMaxCalls;
+
+  for (let turn = 0; turn < MAX_TURNS && callsLeft > 0; turn++) {
+    if (anthropic) {
+      const res = await anthropic.messages.create({
+        model: "claude-opus-5",
+        max_tokens: 1024,
+        system: managerSystem,
+        messages,
+        tools: [delegateTool as unknown as Anthropic.Tool],
+      });
+      totalTokens += (res.usage.input_tokens ?? 0) + (res.usage.output_tokens ?? 0);
+
+      const assistantContent: Anthropic.ContentBlock[] = res.content;
+      messages.push({ role: "assistant", content: assistantContent });
+
+      if (res.stop_reason === "end_turn") {
+        const text = assistantContent.filter((b) => b.type === "text").map((b) => (b as Anthropic.TextBlock).text).join("");
+        return { text, tokens: totalTokens };
+      }
+
+      const toolUses = assistantContent.filter((b) => b.type === "tool_use") as Anthropic.ToolUseBlock[];
+      if (!toolUses.length) break;
+
+      const toolResults: Anthropic.ToolResultBlockParam[] = [];
+      for (const use of toolUses) {
+        const { specialist_index, input: subInput } = use.input as { specialist_index: number; input: string };
+        const sub = subAgentSpecs[specialist_index - 1];
+        if (!sub) { toolResults.push({ type: "tool_result", tool_use_id: use.id, content: "Specialist not found." }); continue; }
+
+        const t0 = Date.now();
+        callsLeft--;
+        const subResult = await runAgent({ spec: sub.spec, input: subInput, history: [], llm });
+        totalTokens += subResult.tokens;
+        onStep({
+          type: "manager_call",
+          title: `→ ${sub.ref.label || sub.spec.name}`,
+          detail: subInput.slice(0, 120),
+          result: subResult.text.slice(0, 200),
+          ms: Date.now() - t0,
+          tokens: subResult.tokens,
+          subSteps: subResult.steps,
+        });
+        toolResults.push({ type: "tool_result", tool_use_id: use.id, content: subResult.text });
+      }
+      messages.push({ role: "user", content: toolResults });
+    } else {
+      // OpenAI path
+      const openaiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+        { role: "system", content: managerSystem },
+        ...history.map((h) => ({ role: h.role as "user" | "assistant", content: h.content })),
+        { role: "user", content: input },
+      ];
+      const res = await client!.chat.completions.create({
+        model: "gpt-5.5",
+        messages: openaiMessages,
+        tools: [{ type: "function", function: { name: "delegate", description: delegateTool.description, parameters: delegateTool.input_schema } }],
+        tool_choice: "auto",
+      });
+      totalTokens += (res.usage?.total_tokens ?? 0);
+      const msg = res.choices[0].message;
+      if (!msg.tool_calls?.length) return { text: msg.content ?? "", tokens: totalTokens };
+
+      for (const tc of msg.tool_calls) {
+        if (tc.type !== "function") continue;
+        const args = JSON.parse(tc.function.arguments) as { specialist_index: number; input: string };
+        const sub = subAgentSpecs[args.specialist_index - 1];
+        if (!sub) continue;
+        callsLeft--;
+        const t0 = Date.now();
+        const subResult = await runAgent({ spec: sub.spec, input: args.input, history: [], llm });
+        totalTokens += subResult.tokens;
+        onStep({
+          type: "manager_call",
+          title: `→ ${sub.ref.label || sub.spec.name}`,
+          detail: args.input.slice(0, 120),
+          result: subResult.text.slice(0, 200),
+          ms: Date.now() - t0,
+          tokens: subResult.tokens,
+          subSteps: subResult.steps,
+        });
+      }
+      return { text: msg.content ?? "(No final answer)", tokens: totalTokens };
+    }
+  }
+  return { text: "(Manager reached call limit)", tokens: totalTokens };
+}
+
+export async function runAgent({ spec: compiled, input, history, llm, loadDocs, onStep, slackWebhookUrl, supabase, agentId, projectId }: RunOptions): Promise<RunResult> {
   const spec = { ...compiled };
   const steps: TraceStep[] = [];
   const step: StepFn = (s) => {
@@ -71,7 +215,20 @@ export async function runAgent({ spec: compiled, input, history, llm, loadDocs, 
     const docs = (await loadDocs()).filter((d) => spec.knowledgeNodeIds.includes(d.node_id));
     if (docs.length) {
       const query = [history.filter((h) => h.role === "user").at(-1)?.content ?? "", input].join(" ");
-      passages = rank(chunkDocs(docs.map((d) => ({ name: d.name, pages: d.content as string[] }))), query, 6);
+      const allPassages = chunkDocs(docs.map((d) => ({ name: d.name, pages: d.content as string[] })));
+
+      // Build hybrid options when we have a DB client and can embed the query.
+      let hybrid: HybridOptions | undefined;
+      if (supabase && agentId) {
+        const embedding = await embedText(query, llm).catch(() => null);
+        if (embedding) {
+          // Use the first knowledge node id; multi-node hybrid is a future improvement.
+          const nodeId = spec.knowledgeNodeIds[0];
+          hybrid = { supabase, agentId, nodeId, embedding };
+        }
+      }
+
+      passages = await rank(allPassages, query, 6, hybrid);
       step({
         type: "knowledge",
         title: passages.length ? `Retrieved ${passages.length} passage${passages.length > 1 ? "s" : ""}` : `Searched ${docs.length} file${docs.length > 1 ? "s" : ""} — nothing relevant`,
@@ -81,6 +238,22 @@ export async function runAgent({ spec: compiled, input, history, llm, loadDocs, 
     }
   }
   if (spec.rules.length) step({ type: "guardrail", title: `${spec.rules.length} rule${spec.rules.length > 1 ? "s" : ""} active`, detail: spec.rules.join(" · ") });
+
+  // Multi-agent: if a Manager node exists and sub-agents are linked, use the supervisor pattern.
+  if (spec.subAgents.length && spec.managerMaxCalls > 0 && supabase) {
+    const { compileAgent } = await import("@/lib/agent/compile");
+    const subAgentSpecs: Array<{ ref: AgentSpec["subAgents"][0]; spec: AgentSpec }> = [];
+    for (const ref of spec.subAgents) {
+      const { data } = await supabase.from("agents").select("name, graph").eq("id", ref.id).single();
+      if (data) subAgentSpecs.push({ ref, spec: compileAgent(data.graph, data.name) });
+    }
+    if (subAgentSpecs.length) {
+      step({ type: "llm", title: `Coordinator routing to ${subAgentSpecs.length} specialist${subAgentSpecs.length > 1 ? "s" : ""}` });
+      const mgr = await runSupervisor(spec, input, history, llm, subAgentSpecs, step);
+      step({ type: "output", title: `Delivered as ${spec.output.toLowerCase()}` });
+      return { text: mgr.text, steps, tokens: mgr.tokens, latencyMs: Date.now() - started, provider: llm.provider };
+    }
+  }
 
   // Run on the provider the Brain block asks for; the caller resolved a fallback if it isn't configured.
   const provider = llm.provider;
@@ -92,9 +265,9 @@ export async function runAgent({ spec: compiled, input, history, llm, loadDocs, 
   }
   const result =
     provider === "anthropic"
-      ? await runClaude(spec, history, input, step, passages, llm.apiKey)
+      ? await runClaude(spec, history, input, step, passages, llm.apiKey, { slackWebhookUrl, supabase, projectId })
       : provider === "openai"
-        ? await runOpenAI(spec, history, input, step, passages, llm.apiKey)
+        ? await runOpenAI(spec, history, input, step, passages, llm.apiKey, { slackWebhookUrl, supabase, projectId })
         : await runDemo(spec, input, step, passages);
 
   let text = result.text;
@@ -137,6 +310,79 @@ const CLIENT_TOOLS: Record<string, Anthropic.Beta.BetaTool["input_schema"]> = {
     required: ["method", "url"],
   },
 };
+
+// Only Slack incoming webhook URLs are permitted — blocks SSRF against internal services.
+const SLACK_WEBHOOK_RE = /^https:\/\/hooks\.slack\.com\/services\/[A-Za-z0-9_]+\/[A-Za-z0-9_]+\/[A-Za-z0-9_]+$/;
+
+export type ToolContext = {
+  slackWebhookUrl?: string;
+  supabase?: SupabaseClient;
+  projectId?: string;
+};
+
+/** Executes a tool call. Returns the JSON result and whether it ran for real. */
+export async function executeToolCall(
+  name: string,
+  input: Record<string, unknown>,
+  ctx: ToolContext = {},
+): Promise<{ output: string; live: boolean }> {
+  const { slackWebhookUrl, supabase, projectId } = ctx;
+
+  // ── Slack ──────────────────────────────────────────────────────────────────
+  if (name === "slack_message") {
+    // Prefer OAuth connector token over legacy incoming webhook.
+    if (supabase && projectId) {
+      const connector = await resolveConnector("slack", projectId, supabase).catch(() => null);
+      if (connector) {
+        const channel = String(input.channel ?? connector.meta["channel_default"] ?? "#general");
+        const result = await postSlackMessage(connector.accessToken, channel, String(input.text ?? "")).catch(() => null);
+        if (result?.ok) return { output: JSON.stringify({ ok: true, channel, ts: result.ts }), live: true };
+      }
+    }
+    if (slackWebhookUrl && SLACK_WEBHOOK_RE.test(slackWebhookUrl)) {
+      try {
+        const res = await fetch(slackWebhookUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: String(input.text ?? "") }),
+          signal: AbortSignal.timeout(5000),
+        });
+        if (res.ok) return { output: JSON.stringify({ ok: true, channel: input.channel, ts: `${Math.floor(Date.now() / 1000)}.000200` }), live: true };
+      } catch {
+        // fall through to simulate
+      }
+    }
+  }
+
+  // ── Gmail ──────────────────────────────────────────────────────────────────
+  if (name === "send_email" && supabase && projectId) {
+    const connector = await resolveConnector("gmail", projectId, supabase).catch(() => null);
+    if (connector) {
+      const result = await sendGmail(
+        connector.accessToken,
+        String(input.to ?? ""),
+        String(input.subject ?? "(no subject)"),
+        String(input.body ?? ""),
+      ).catch(() => null);
+      if (result?.ok) return { output: JSON.stringify({ status: "sent", messageId: result.messageId }), live: true };
+    }
+  }
+
+  // ── HubSpot ────────────────────────────────────────────────────────────────
+  if (name === "crm_lookup" && supabase && projectId) {
+    const connector = await resolveConnector("hubspot", projectId, supabase).catch(() => null);
+    if (connector) {
+      const result = await upsertContact(
+        connector.accessToken,
+        String(input.email ?? ""),
+        typeof input.fields === "object" && input.fields ? (input.fields as Record<string, string>) : {},
+      ).catch(() => null);
+      if (result?.ok) return { output: JSON.stringify({ contactId: result.contactId, status: "upserted" }), live: true };
+    }
+  }
+
+  return { output: simulateTool(name, input), live: false };
+}
 
 // Integrations aren't connected in the sandbox, so tool calls return realistic simulated results.
 function simulateTool(name: string, input: Record<string, unknown>): string {
@@ -191,6 +437,7 @@ async function runClaude(
   step: StepFn,
   passages: Passage[],
   apiKey?: string,
+  toolCtx: ToolContext = {},
 ): Promise<{ text: string; tokens: number }> {
   const client = new Anthropic(apiKey ? { apiKey } : {});
   const tools = buildTools(spec);
@@ -233,13 +480,15 @@ async function runClaude(
     const toolUses = res.content.filter((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === "tool_use");
     if (res.stop_reason === "tool_use" && toolUses.length) {
       messages.push({ role: "assistant", content: res.content });
-      const results: Anthropic.Beta.BetaToolResultBlockParam[] = toolUses.map((use) => {
-        const input = (use.input ?? {}) as Record<string, unknown>;
-        const output = simulateTool(use.name, input);
-        const meta = TOOL_CATALOG.find((t) => t.id === use.name);
-        step({ type: "tool", title: meta?.label ?? use.name, detail: JSON.stringify(input).slice(0, 200), result: output.slice(0, 300), simulated: true });
-        return { type: "tool_result", tool_use_id: use.id, content: output };
-      });
+      const results: Anthropic.Beta.BetaToolResultBlockParam[] = await Promise.all(
+        toolUses.map(async (use) => {
+          const toolInput = (use.input ?? {}) as Record<string, unknown>;
+          const { output, live } = await executeToolCall(use.name, toolInput, toolCtx);
+          const meta = TOOL_CATALOG.find((t) => t.id === use.name);
+          step({ type: "tool", title: meta?.label ?? use.name, detail: JSON.stringify(toolInput).slice(0, 200), result: output.slice(0, 300), simulated: !live, live });
+          return { type: "tool_result" as const, tool_use_id: use.id, content: output };
+        }),
+      );
       messages.push({ role: "user", content: results });
       continue;
     }
@@ -261,6 +510,7 @@ async function runOpenAI(
   step: StepFn,
   passages: Passage[],
   apiKey?: string,
+  toolCtx: ToolContext = {},
 ): Promise<{ text: string; tokens: number }> {
   const client = new OpenAI(apiKey ? { apiKey } : {});
   const model = spec.model.startsWith("gpt") ? spec.model : OPENAI_MODEL;
@@ -308,9 +558,9 @@ async function runOpenAI(
         } catch {
           args = {};
         }
-        const output = simulateTool(call.function.name, args);
+        const { output, live } = await executeToolCall(call.function.name, args, toolCtx);
         const meta = TOOL_CATALOG.find((t) => t.id === call.function.name);
-        step({ type: "tool", title: meta?.label ?? call.function.name, detail: JSON.stringify(args).slice(0, 200), result: output.slice(0, 300), simulated: true });
+        step({ type: "tool", title: meta?.label ?? call.function.name, detail: JSON.stringify(args).slice(0, 200), result: output.slice(0, 300), simulated: !live, live });
         messages.push({ role: "tool", tool_call_id: call.id, content: output });
       }
       continue;

@@ -1,6 +1,11 @@
 import type { Passage } from "./retrieval";
 import type { AgentGraph, AgentNodeData } from "./types";
 
+export type SubAgentRef = {
+  id: string;  // DB agent id
+  label: string;
+};
+
 export type AgentSpec = {
   name: string;
   model: string;
@@ -14,6 +19,10 @@ export type AgentSpec = {
   memory: string | null;
   /** Connected Knowledge blocks — their uploaded files are searched at run time. */
   knowledgeNodeIds: string[];
+  /** Sub-agents linked to a Manager node (supervisor pattern). Empty = no multi-agent. */
+  subAgents: SubAgentRef[];
+  /** Max number of sub-agent calls when a Manager node is present. */
+  managerMaxCalls: number;
 };
 
 const of = (graph: AgentGraph, kind: AgentNodeData["kind"]) => graph.nodes.filter((n) => n.data.kind === kind).map((n) => n.data);
@@ -46,6 +55,9 @@ export function compileAgent(graph: AgentGraph, name: string): AgentSpec {
   const llm = of(liveGraph, "llm")[0];
   const guards = of(liveGraph, "guardrail");
 
+  const managerNode = of(liveGraph, "manager")[0];
+  const subAgentNodes = of(liveGraph, "subagent");
+
   return {
     name,
     model: str(llm?.config.model, "claude-opus-5"),
@@ -61,6 +73,10 @@ export function compileAgent(graph: AgentGraph, name: string): AgentSpec {
     output: str(of(liveGraph, "output")[0]?.config.format, "Chat reply"),
     memory: of(liveGraph, "memory")[0] ? str(of(liveGraph, "memory")[0].config.scope, "Conversation") : null,
     knowledgeNodeIds: liveGraph.nodes.filter((n) => n.data.kind === "knowledge").map((n) => n.id),
+    subAgents: subAgentNodes
+      .map((n) => ({ id: str(n.config.agentId), label: str(n.config.label) }))
+      .filter((s) => s.id),
+    managerMaxCalls: managerNode ? Math.min(8, Math.max(1, parseInt(str(managerNode.config.maxCalls, "4"), 10) || 4)) : 0,
   };
 }
 

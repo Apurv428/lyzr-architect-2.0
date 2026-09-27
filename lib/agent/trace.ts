@@ -1,6 +1,6 @@
 export type TraceStep = {
   id: string;
-  type: "trigger" | "knowledge" | "llm" | "tool" | "guardrail" | "output";
+  type: "trigger" | "knowledge" | "llm" | "tool" | "guardrail" | "output" | "manager_call";
   title: string;
   detail?: string;
   result?: string;
@@ -10,6 +10,8 @@ export type TraceStep = {
   simulated?: boolean;
   /** Tool ran for real (e.g. web search). */
   live?: boolean;
+  /** Nested sub-agent trace (manager_call steps only). */
+  subSteps?: TraceStep[];
 };
 
 export type TraceEvent =

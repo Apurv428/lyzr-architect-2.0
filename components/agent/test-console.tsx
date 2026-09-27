@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, BookOpen, Bot, ChevronDown, Globe, ListPlus, Loader2, MessageSquareReply, RotateCcw, ShieldCheck, Wrench, X, Zap } from "lucide-react";
+import { ArrowUp, BookOpen, Bot, ChevronDown, Globe, ListPlus, Loader2, MessageSquareReply, Network, RotateCcw, ShieldCheck, Wrench, X, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { addEvalCase } from "@/lib/actions/evals";
@@ -27,31 +27,48 @@ const STEP_ICON: Record<TraceStep["type"], typeof Bot> = {
   tool: Wrench,
   guardrail: ShieldCheck,
   output: MessageSquareReply,
+  manager_call: Network,
 };
+
+function TraceItem({ s }: { s: TraceStep }) {
+  const [expanded, setExpanded] = useState(false);
+  const Icon = s.title.startsWith("Web search") || s.title.includes("web results") ? Globe : STEP_ICON[s.type];
+  const hasSubSteps = s.type === "manager_call" && s.subSteps?.length;
+
+  return (
+    <li className="relative pb-2.5 text-xs">
+      <span className="absolute top-0.5 -left-[19px] grid size-3.5 place-items-center rounded-full bg-background">
+        <Icon className="size-3 text-muted-foreground" />
+      </span>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="font-medium text-foreground">{s.title}</span>
+        {s.live && <span className="rounded bg-emerald-500/15 px-1 text-[10px] text-emerald-600 dark:text-emerald-400">live</span>}
+        {s.simulated && <span className="rounded bg-amber-500/15 px-1 text-[10px] text-amber-600 dark:text-amber-400">simulated</span>}
+        {s.ms != null && <span className="text-muted-foreground">{(s.ms / 1000).toFixed(1)}s</span>}
+        {s.tokens != null && <span className="text-muted-foreground">{s.tokens.toLocaleString()} tok</span>}
+        {hasSubSteps && (
+          <button onClick={() => setExpanded((v) => !v)} className="flex items-center gap-0.5 text-muted-foreground hover:text-foreground">
+            <ChevronDown className={cn("size-3 transition", expanded && "rotate-180")} />
+            {s.subSteps!.length} step{s.subSteps!.length > 1 ? "s" : ""}
+          </button>
+        )}
+      </div>
+      {s.detail && <p className="mt-0.5 line-clamp-2 break-all text-muted-foreground">{s.detail}</p>}
+      {s.result && <p className="mt-0.5 line-clamp-2 font-mono break-all text-[10px] text-muted-foreground/80">→ {s.result}</p>}
+      {hasSubSteps && expanded && (
+        <ol className="mt-1.5 space-y-0 border-l pl-3">
+          {s.subSteps!.map((sub) => <TraceItem key={sub.id} s={sub} />)}
+        </ol>
+      )}
+    </li>
+  );
+}
 
 function Trace({ steps, open }: { steps: TraceStep[]; open: boolean }) {
   if (!open) return null;
   return (
     <ol className="mt-2 space-y-0 border-l pl-3">
-      {steps.map((s) => {
-        const Icon = s.title.startsWith("Web search") || s.title.includes("web results") ? Globe : STEP_ICON[s.type];
-        return (
-          <li key={s.id} className="relative pb-2.5 text-xs">
-            <span className="absolute top-0.5 -left-[19px] grid size-3.5 place-items-center rounded-full bg-background">
-              <Icon className="size-3 text-muted-foreground" />
-            </span>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="font-medium text-foreground">{s.title}</span>
-              {s.live && <span className="rounded bg-emerald-500/15 px-1 text-[10px] text-emerald-600 dark:text-emerald-400">live</span>}
-              {s.simulated && <span className="rounded bg-amber-500/15 px-1 text-[10px] text-amber-600 dark:text-amber-400">simulated</span>}
-              {s.ms != null && <span className="text-muted-foreground">{(s.ms / 1000).toFixed(1)}s</span>}
-              {s.tokens != null && <span className="text-muted-foreground">{s.tokens.toLocaleString()} tok</span>}
-            </div>
-            {s.detail && <p className="mt-0.5 line-clamp-2 break-all text-muted-foreground">{s.detail}</p>}
-            {s.result && <p className="mt-0.5 line-clamp-2 font-mono break-all text-[10px] text-muted-foreground/80">→ {s.result}</p>}
-          </li>
-        );
-      })}
+      {steps.map((s) => <TraceItem key={s.id} s={s} />)}
     </ol>
   );
 }
