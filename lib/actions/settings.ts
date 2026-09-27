@@ -3,6 +3,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import { revalidatePath } from "next/cache";
+import { openaiClient } from "@/lib/ai/provider";
 import { encrypt } from "@/lib/crypto";
 import { getUser } from "@/lib/supabase/server";
 import type { Mode } from "@/lib/types";
@@ -47,7 +48,7 @@ export async function saveModelKey(provider: "anthropic" | "openai", key: string
 
   try {
     if (provider === "anthropic") await new Anthropic({ apiKey: value }).models.list({ limit: 1 });
-    else await new OpenAI({ apiKey: value }).models.list();
+    else await openaiClient(value).models.list();
   } catch (err) {
     const status = err instanceof Anthropic.APIError || err instanceof OpenAI.APIError ? err.status : undefined;
     return { error: status === 401 ? "The provider rejected that key." : "Couldn't verify the key right now — try again." };

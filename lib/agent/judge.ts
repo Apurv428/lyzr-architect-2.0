@@ -1,8 +1,7 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
-import OpenAI from "openai";
 import type { ResolvedProvider } from "@/lib/ai/keys";
-import { OPENAI_MODEL, supportsReasoningEffort } from "@/lib/ai/provider";
+import { openaiClient, openaiModelFor, supportsReasoningEffort } from "@/lib/ai/provider";
 import { parseVerdict } from "./evals";
 
 const JUDGE_SYSTEM = `You grade replies from an AI agent against a test criterion written by the agent's owner.
@@ -31,15 +30,16 @@ export async function judge(llm: ResolvedProvider, criterion: string, input: str
     return parseVerdict(text);
   }
 
-  const client = new OpenAI(llm.apiKey ? { apiKey: llm.apiKey } : {});
+  const client = openaiClient(llm.apiKey);
+  const model = openaiModelFor(Boolean(llm.apiKey));
   const res = await client.chat.completions.create({
-    model: OPENAI_MODEL,
+    model,
     messages: [
       { role: "system", content: JUDGE_SYSTEM },
       { role: "user", content: prompt },
     ],
     max_completion_tokens: 2000,
-    ...(supportsReasoningEffort(OPENAI_MODEL) ? { reasoning_effort: "low" as const } : {}),
+    ...(supportsReasoningEffort(model) ? { reasoning_effort: "low" as const } : {}),
   });
   return parseVerdict(res.choices[0]?.message.content ?? "");
 }

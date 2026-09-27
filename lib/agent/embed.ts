@@ -1,9 +1,9 @@
 import "server-only";
-import OpenAI from "openai";
-import Anthropic from "@anthropic-ai/sdk";
 import type { ResolvedProvider } from "@/lib/ai/keys";
+import { openaiClient } from "@/lib/ai/provider";
 
-const OPENAI_EMBED_MODEL = "text-embedding-3-small";
+/** A user's own key embeds on OpenAI; the platform key may point at another provider (OPENAI_BASE_URL). */
+const openaiEmbedModel = (ownKey?: string) => (ownKey ? "text-embedding-3-small" : (process.env.OPENAI_EMBED_MODEL ?? "text-embedding-3-small"));
 const VOYAGE_EMBED_MODEL = "voyage-3";
 const EMBED_DIM = 1536;
 const BATCH_SIZE = 96;
@@ -15,8 +15,8 @@ export async function embedText(text: string, provider: ResolvedProvider): Promi
   if (provider.provider === "demo") return null;
 
   if (provider.provider === "openai") {
-    const client = new OpenAI({ apiKey: provider.apiKey });
-    const res = await client.embeddings.create({ model: OPENAI_EMBED_MODEL, input: text, dimensions: EMBED_DIM });
+    const client = openaiClient(provider.apiKey);
+    const res = await client.embeddings.create({ model: openaiEmbedModel(provider.apiKey), input: text, dimensions: EMBED_DIM });
     return res.data[0].embedding;
   }
 
@@ -55,8 +55,8 @@ export async function embedPassages(
 
     if (provider.provider === "openai") {
       try {
-        const client = new OpenAI({ apiKey: provider.apiKey });
-        const res = await client.embeddings.create({ model: OPENAI_EMBED_MODEL, input: batch, dimensions: EMBED_DIM });
+        const client = openaiClient(provider.apiKey);
+        const res = await client.embeddings.create({ model: openaiEmbedModel(provider.apiKey), input: batch, dimensions: EMBED_DIM });
         for (let j = 0; j < batch.length; j++) {
           results.push({ text: batch[j], embedding: res.data[j]?.embedding ?? null });
         }

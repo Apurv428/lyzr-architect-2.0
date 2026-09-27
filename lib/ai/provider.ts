@@ -1,5 +1,5 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import type OpenAI from "openai";
+import OpenAI from "openai";
 
 export const HAS_ANTHROPIC = Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
 export const HAS_OPENAI = Boolean(process.env.OPENAI_API_KEY);
@@ -15,6 +15,30 @@ export function chatProvider(): Provider {
   if (preferred === "openai" && HAS_OPENAI) return "openai";
   if (preferred === "anthropic" && HAS_ANTHROPIC) return "anthropic";
   return HAS_ANTHROPIC ? "anthropic" : HAS_OPENAI ? "openai" : "demo";
+}
+
+/**
+ * OpenAI SDK client. The platform key follows OPENAI_BASE_URL, so an OpenAI-compatible provider (such as
+ * Gemini's free tier) can stand in for OpenAI; a user's own key always goes to OpenAI itself.
+ */
+export function openaiClient(apiKey?: string) {
+  return apiKey ? new OpenAI({ apiKey, baseURL: "https://api.openai.com/v1" }) : new OpenAI();
+}
+
+/**
+ * The model for an OpenAI-SDK call. A GPT model picked on the canvas runs as-is when the call goes to OpenAI.
+ * When the platform key points at another provider, OPENAI_MODEL names that provider's model, so a user's
+ * own OpenAI key falls back to OpenAI's default instead.
+ */
+export function openaiModelFor(ownKey: boolean, requested?: string) {
+  const onOpenAI = ownKey || !process.env.OPENAI_BASE_URL;
+  if (requested?.startsWith("gpt") && onOpenAI) return requested;
+  return ownKey && process.env.OPENAI_BASE_URL ? "gpt-5.5" : OPENAI_MODEL;
+}
+
+/** The account behind the key has no credits left. OpenAI sends this as a 429, but retrying never helps. */
+export function isOutOfCredits(err: unknown) {
+  return err instanceof OpenAI.APIError && (err.type === "insufficient_quota" || err.code === "insufficient_quota");
 }
 
 /** Reasoning-effort is only accepted by reasoning model families. */

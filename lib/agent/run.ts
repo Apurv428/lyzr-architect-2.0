@@ -12,7 +12,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { MODELS, TOOL_CATALOG } from "@/lib/agent/types";
 import type { TraceStep } from "@/lib/agent/trace";
 import type { ResolvedProvider } from "@/lib/ai/keys";
-import { OPENAI_MODEL, supportsReasoningEffort } from "@/lib/ai/provider";
+import { isOutOfCredits, openaiClient, openaiModelFor, supportsReasoningEffort } from "@/lib/ai/provider";
 
 // One agent runner shared by the test console, the public API and evals.
 
@@ -61,6 +61,7 @@ export function unavailableModel(spec: AgentSpec) {
 
 /** Turns SDK errors into short messages that are safe to show to users and API callers. */
 export function describeRunError(err: unknown) {
+  if (isOutOfCredits(err)) return "The AI provider account is out of credits. Add your own model key in Settings to keep testing.";
   if (err instanceof Anthropic.RateLimitError || err instanceof OpenAI.RateLimitError) return "The model is busy — try again in a few seconds.";
   if (err instanceof Anthropic.APIError || err instanceof OpenAI.APIError) return `Model error (${err.status}). Try again or switch models.`;
   if (err instanceof AgentRunError) return err.message;
@@ -84,7 +85,7 @@ async function runSupervisor(
   const subList = subAgentSpecs.map((s, i) => `${i + 1}. ${s.ref.label || s.spec.name}: ${s.spec.instructions.slice(0, 120)}`).join("\n");
   const managerSystem = `You are a coordinator agent. Given a user request, call the appropriate specialist agents one at a time using the delegate tool, then synthesise their outputs into a final answer.\n\nAvailable specialists:\n${subList}`;
 
-  const client = llm.provider === "openai" ? new OpenAI({ apiKey: llm.apiKey }) : null;
+  const client = llm.provider === "openai" ? openaiClient(llm.apiKey) : null;
   const anthropic = llm.provider === "anthropic" ? new Anthropic({ apiKey: llm.apiKey }) : null;
 
   const delegateTool = {
@@ -160,7 +161,7 @@ async function runSupervisor(
         { role: "user", content: input },
       ];
       const res = await client!.chat.completions.create({
-        model: "gpt-5.5",
+        model: openaiModelFor(Boolean(llm.apiKey)),
         messages: openaiMessages,
         tools: [{ type: "function", function: { name: "delegate", description: delegateTool.description, parameters: delegateTool.input_schema } }],
         tool_choice: "auto",
@@ -259,9 +260,9 @@ export async function runAgent({ spec: compiled, input, history, llm, loadDocs, 
   const provider = llm.provider;
   const wantsOpenAI = spec.model.startsWith("gpt");
   if (provider !== "demo" && (provider === "openai") !== wantsOpenAI) {
-    const ranOn = provider === "openai" ? OPENAI_MODEL : "Claude Opus 5";
-    step({ type: "llm", title: `${modelLabel} isn't configured here — running on ${ranOn}` });
-    spec.model = provider === "openai" ? OPENAI_MODEL : "claude-opus-5";
+    const fallback = provider === "openai" ? openaiModelFor(Boolean(llm.apiKey)) : "claude-opus-5";
+    step({ type: "llm", title: `${modelLabel} isn't configured here — running on ${provider === "openai" ? fallback : "Claude Opus 5"}` });
+    spec.model = fallback;
   }
   const result =
     provider === "anthropic"
@@ -512,8 +513,8 @@ async function runOpenAI(
   apiKey?: string,
   toolCtx: ToolContext = {},
 ): Promise<{ text: string; tokens: number }> {
-  const client = new OpenAI(apiKey ? { apiKey } : {});
-  const model = spec.model.startsWith("gpt") ? spec.model : OPENAI_MODEL;
+  const client = openaiClient(apiKey);
+  const model = openaiModelFor(Boolean(apiKey), spec.model);
   const tools: OpenAI.Chat.Completions.ChatCompletionFunctionTool[] = spec.tools
     .filter((id) => id === "web_search" || CLIENT_TOOLS[id])
     .map((id) => ({
