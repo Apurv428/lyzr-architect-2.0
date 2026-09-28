@@ -2,15 +2,41 @@ import type { Plan } from "@/lib/ai/schema";
 import { DEFAULT_CONFIG, TOOL_CATALOG, type AgentGraph, type GraphNode, type NodeKind } from "./types";
 
 // Map free-text plan tools onto catalog tools where we can.
+// Named products come first, so "Jira ticket" maps to Jira rather than a generic ticket tool.
+const TOOL_PATTERNS: [RegExp, string][] = [
+  [/slack/, "slack_message"],
+  [/\bteams\b/, "teams_message"],
+  [/telegram/, "telegram_message"],
+  [/twitter|tweet|\bx post/, "tweet"],
+  [/linkedin/, "linkedin_post"],
+  [/calendar|schedul.*meeting/, "google_calendar"],
+  [/notion/, "notion"],
+  [/confluence/, "confluence"],
+  [/google doc/, "google_docs"],
+  [/google drive|\bdrive\b/, "google_drive"],
+  [/dropbox/, "dropbox"],
+  [/asana/, "asana"],
+  [/trello/, "trello"],
+  [/\blinear\b/, "linear"],
+  [/jira/, "jira"],
+  [/github|pull request/, "github_action"],
+  [/apollo|enrich/, "apollo"],
+  [/freshdesk/, "freshdesk"],
+  [/sheet/, "google_sheets"],
+  [/excel/, "excel"],
+  [/arxiv|paper/, "arxiv_search"],
+  [/search|web|browse/, "web_search"],
+  [/email|mail/, "send_email"],
+  [/notif|alert/, "slack_message"],
+  [/crm|hubspot|salesforce|lead|customer/, "crm_lookup"],
+  [/ticket|helpdesk|zendesk/, "create_ticket"],
+  [/sql|database|query/, "sql_query"],
+  [/\bhttp|\bapi\b|webhook/, "http_request"],
+];
+
 function matchTool(name: string) {
   const n = name.toLowerCase();
-  if (/search|web|browse/.test(n)) return "web_search";
-  if (/email|mail/.test(n)) return "send_email";
-  if (/slack|notif|alert/.test(n)) return "slack_message";
-  if (/crm|hubspot|salesforce|lead|customer/.test(n)) return "crm_lookup";
-  if (/ticket|helpdesk|zendesk/.test(n)) return "create_ticket";
-  if (/sql|database|query/.test(n)) return "sql_query";
-  return null;
+  return TOOL_PATTERNS.find(([re]) => re.test(n))?.[1] ?? null;
 }
 
 let seq = 0;
@@ -23,7 +49,8 @@ const node = (kind: NodeKind, label: string, x: number, y: number, config = {}):
 
 export function graphFromPlan(plan: Plan | undefined, name: string): AgentGraph {
   const agent = plan?.agent;
-  const trigger = node("trigger", "Incoming request", 260, 0);
+  const scheduled = agent && /schedul|daily|every (day|morning|evening|night|week)|\b\d{1,2}(:\d{2})?\s*(am|pm)\b/i.test([agent.goal, ...agent.steps].join(" "));
+  const trigger = scheduled ? node("trigger", "On a schedule", 260, 0, { source: "Schedule" }) : node("trigger", "Incoming request", 260, 0);
   const llm = node("llm", agent?.name ?? `${name} Agent`, 260, 130, {
     instructions: agent
       ? `You are ${agent.name}. Goal: ${agent.goal}.\n\nWork through these steps:\n${agent.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}`

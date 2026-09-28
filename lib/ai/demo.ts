@@ -68,6 +68,13 @@ export const DEMO_QUESTIONS: Questions = {
   ],
 };
 
+/** Like the model, ask for the Slack connection when the app is meant to post there. */
+export function demoQuestions(prompt: string): Questions {
+  return /slack/i.test(prompt)
+    ? { ...DEMO_QUESTIONS, fields: [{ id: "slack", label: "Connect the Slack channel it posts to", type: "slack_webhook" }] }
+    : DEMO_QUESTIONS;
+}
+
 export function demoIntro(mode: "guided" | "pro") {
   return mode === "guided"
     ? "Great idea! Here's how I'd build it — take a look, tweak anything, then approve and I'll start."
