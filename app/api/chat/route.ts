@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
-import { DEMO_QUESTIONS, demoBuild, demoEdit, demoIntro, demoPlan } from "@/lib/ai/demo";
+import { DEMO_QUESTIONS, demoBuild, demoEdit, demoIntro, demoPlan, demoQuestions } from "@/lib/ai/demo";
 import { SYSTEM_PROMPT, TOOLS } from "@/lib/ai/prompt";
 import { loadAttachments, toClaudeBlocks, toOpenAIParts } from "@/lib/ai/attachments";
 import { resolveProvider, userAI, type ResolvedProvider } from "@/lib/ai/keys";
@@ -24,6 +24,7 @@ import {
   type WriteFiles,
 } from "@/lib/ai/schema";
 import { track } from "@/lib/analytics";
+import { tokensForPrompt, type DesignTokens } from "@/lib/design-tokens";
 import { OUT_OF_CREDITS, currentCredits, spendCredit } from "@/lib/credits";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
@@ -68,6 +69,10 @@ type Turn = {
   startedAt: number;
   llm: ResolvedProvider;
   userId: string;
+  /** A Slack webhook is saved for this project, so the app's posts go out for real. */
+  slackConnected: boolean;
+  /** The user's brand tokens as a prompt line (Settings → Design system), or "". */
+  brand: string;
 };
 
 export async function POST(request: Request) {
@@ -84,7 +89,7 @@ export async function POST(request: Request) {
   } = await supabase.auth.getUser();
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
-  const [{ data: project }, credits, { data: rows }, { data: checkpoint }, ai] = await Promise.all([
+  const [{ data: project }, credits, { data: rows }, { data: checkpoint }, ai, { data: slackWebhook }, { data: brandRow }] = await Promise.all([
     supabase.from("projects").select("id, name, description, github_repo, prompt, mode, framework, template_id").eq("id", projectId).single(),
     currentCredits(supabase),
     supabase
@@ -101,6 +106,9 @@ export async function POST(request: Request) {
       .limit(1)
       .maybeSingle(),
     userAI(supabase, user.id),
+    supabase.from("env_vars").select("id").eq("project_id", projectId).eq("key", "SLACK_WEBHOOK_URL").limit(1).maybeSingle(),
+    // Its own query: before migration 0016 the column doesn't exist, and that must not break the chat.
+    supabase.from("profiles").select("design_tokens").eq("id", user.id).maybeSingle(),
   ]);
 
   if (!project) return Response.json({ error: "Project not found" }, { status: 404 });
@@ -123,6 +131,8 @@ export async function POST(request: Request) {
         startedAt: Date.now(),
         llm,
         userId: user.id,
+        slackConnected: Boolean(slackWebhook),
+        brand: tokensForPrompt((brandRow as { design_tokens?: DesignTokens | null } | null)?.design_tokens),
       };
 
       try {
@@ -177,7 +187,8 @@ function historyToParams(history: ChatMessage[]): Anthropic.Beta.BetaMessagePara
       params.push({ role: "user", content: `[Workspace event: ${m.content}]` });
     } else if (m.kind === "questions") {
       const q = m.data as Questions;
-      params.push({ role: "assistant", content: `[I asked]\n${q.questions.map((x) => `- ${x.question} (${x.options.join(" / ")})`).join("\n")}` });
+      const asked = [...q.questions.map((x) => `- ${x.question} (${x.options.join(" / ")})`), ...(q.fields ?? []).map((f) => `- ${f.label} (${f.type})`)];
+      params.push({ role: "assistant", content: `[I asked]\n${asked.join("\n")}` });
     } else if (m.kind === "plan") {
       params.push({ role: "assistant", content: `[I proposed this plan]\n${JSON.stringify(m.data)}` });
     } else if (m.kind === "changes") {
@@ -197,7 +208,12 @@ function latestPlan(history: ChatMessage[]) {
   return [...history].reverse().find((m) => m.kind === "plan")?.data as Plan | undefined;
 }
 
-function turnContext({ project, action, files, history }: Turn) {
+/** The last card was the question card, so this message answers (or skips) it and the plan comes next. */
+function answeringQuestions(history: ChatMessage[]) {
+  return [...history].reverse().find((m) => m.role === "assistant" && m.kind !== "text" && m.kind !== "error")?.kind === "questions";
+}
+
+function turnContext({ project, action, files, history, slackConnected, brand }: Turn) {
   const fileList = Object.entries(files);
   const filesBlock = fileList.length
     ? fileList.map(([path, content]) => `<file path="${path}">\n${content}\n</file>`).join("\n")
@@ -205,19 +221,24 @@ function turnContext({ project, action, files, history }: Turn) {
   const directive =
     action === "start"
       ? project.mode === "guided"
-        ? "This is a brand-new project. If the request leaves the users, data source or outcome unclear, ask with ask_questions; otherwise propose a plan with propose_plan."
-        : "This is a brand-new project. Propose a plan with propose_plan."
+        ? "This is a brand-new project. If the request leaves the users, data source or outcome unclear, or needs a connection that isn't set up yet (such as posting to Slack), ask with ask_questions; otherwise propose a plan with propose_plan."
+        : "This is a brand-new project. Propose a plan with propose_plan, unless it needs a connection that isn't set up yet: then ask for that with ask_questions first."
       : action === "approve"
         ? latestPlan(history)?.edited
           ? "The user edited the latest plan themselves, then approved it. Follow the edited version exactly and build the complete app now with write_files."
           : "The user approved the latest plan. Build the complete app now with write_files."
-        : "Respond to the user's latest message.";
+        : answeringQuestions(history)
+          ? "The user answered your questions. Propose a plan with propose_plan."
+          : "Respond to the user's latest message.";
 
   return `<context>
 Mode: ${project.mode === "pro" ? "Pro" : "Guided"}
-Project: ${project.name}${project.framework ? `\nPreferred agent framework: ${project.framework}` : ""}${
-    project.github_repo
-      ? `\nImported repository: ${project.description}\nThe user's repo is not modified directly — plan the agent to fit their stack, and build a demo UI for it in the sandbox. Changes reach their repo later as a pull request.`
+Project: ${project.name}
+Slack: ${slackConnected ? "connected (the app's postToSlack posts for real)" : "not connected"}${brand ? `\n${brand}` : ""}${project.framework ? `\nPreferred agent framework: ${project.framework}` : ""}${
+    project.github_repo || project.description?.startsWith("Imported from")
+      ? fileList.length
+        ? `\nImported project: ${project.description}\nIts real files are below. Keep working on them: edit files in place at the same paths, match the existing stack and style, and add only the files you need.${project.github_repo ? " Changes go back to the repo as a pull request." : ""}`
+        : `\nImported repository: ${project.description}\nThe user's repo is not modified directly — plan the agent to fit their stack, and build a demo UI for it in the sandbox. Changes reach their repo later as a pull request.`
       : ""
   }
 Current app files:
@@ -332,6 +353,7 @@ async function applyToolCall(turn: Turn, name: string, input: unknown): Promise<
   if (name === "ask_questions") {
     const questions = QuestionsSchema.safeParse(input);
     if (!questions.success) {
+      console.warn("[chat] ask_questions rejected", questions.error.issues.slice(0, 5));
       await failTurn(turn, "My questions came out garbled. Retry and I'll ask again — or just describe more detail.");
       return false;
     }
@@ -339,6 +361,7 @@ async function applyToolCall(turn: Turn, name: string, input: unknown): Promise<
   } else if (name === "propose_plan") {
     const plan = PlanSchema.safeParse(input);
     if (!plan.success) {
+      console.warn("[chat] propose_plan rejected", plan.error.issues.slice(0, 5));
       await failTurn(turn, "My plan came out incomplete. Retry and I'll draft it again.");
       return false;
     }
@@ -346,6 +369,7 @@ async function applyToolCall(turn: Turn, name: string, input: unknown): Promise<
   } else if (name === "write_files") {
     const write = WriteFilesSchema.safeParse(input);
     if (!write.success) {
+      console.warn("[chat] write_files rejected", write.error.issues.slice(0, 5), Object.keys((input ?? {}) as object));
       await failTurn(turn, "Some files came out incomplete, so I didn't apply them. Retry to regenerate.");
       return false;
     }
@@ -385,12 +409,15 @@ async function runOpenAITurn(turn: Turn): Promise<boolean> {
         max_completion_tokens: 32000,
         ...(supportsReasoningEffort(model) ? { reasoning_effort: turn.action === "approve" ? ("medium" as const) : ("low" as const) } : {}),
         // Some OpenAI-compatible models (Gemini) announce "building now…" and end the turn without the call.
-        // An approval always means a build, and a new project always starts with questions or a plan.
+        // An approval always means a build, a new project starts with questions or a plan, and
+        // answering the questions always leads to the plan.
         ...(turn.action === "approve"
           ? { tool_choice: { type: "function" as const, function: { name: "write_files" } } }
           : turn.action === "start"
             ? { tool_choice: "required" as const }
-            : {}),
+            : answeringQuestions(turn.history)
+              ? { tool_choice: { type: "function" as const, function: { name: "propose_plan" } } }
+              : {}),
       },
       { signal: turn.signal },
     );
@@ -457,6 +484,7 @@ async function runOpenAITurn(turn: Turn): Promise<boolean> {
     try {
       input = JSON.parse(call.args);
     } catch {
+      console.warn("[chat] unparseable tool call", call.name, call.args.length, call.args.slice(-200));
       await failTurn(turn, "I produced a malformed response. Retrying usually fixes it.");
       return false;
     }
@@ -491,12 +519,13 @@ async function runDemoTurn(turn: Turn, notice?: string): Promise<boolean> {
   if (action === "start" && project.mode === "guided" && !project.template_id) {
     send({ t: "status", label: "Preparing a few questions…" });
     await sleep(700);
-    await insertMessage(turn, { role: "assistant", kind: "questions", content: DEMO_QUESTIONS.intro ?? null, data: DEMO_QUESTIONS });
+    const questions = turn.slackConnected ? DEMO_QUESTIONS : demoQuestions(project.prompt ?? "");
+    await insertMessage(turn, { role: "assistant", kind: "questions", content: questions.intro ?? null, data: questions });
     return true;
   }
 
   if (action === "start" || (action === "message" && !latestPlan)) {
-    const answered = [...turn.history].reverse().find((m) => m.role === "assistant")?.kind === "questions";
+    const answered = answeringQuestions(turn.history);
     send({ t: "status", label: "Thinking…" });
     await sleep(600);
     await streamText(turn, demoIntro(project.mode));

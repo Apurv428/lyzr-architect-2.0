@@ -3,38 +3,90 @@ import type { Attachment } from "@/lib/attachments";
 
 // ── Tool inputs (validated server-side before anything is persisted) ──
 
+// Some OpenAI-compatible providers (Gemini) flatten small objects into strings ("Dashboard: today's
+// tickets"), send a lone string where a list belongs, or leave lists out. The plan is normalized
+// back into shape; only the parts the build can't do without stay required.
+
+const toList = (v: unknown) => (v == null ? [] : Array.isArray(v) ? v : [v]);
+const list = <T extends z.ZodType>(item: T, min = 0) => z.preprocess(toList, z.array(item).min(min));
+
+/** "Name: detail", "Name — detail", "Name - detail" or "Name (detail)" → [name, detail]. */
+export function splitLabel(s: string): [string, string] {
+  const m = s.match(/^\s*(.+?)\s*(?::|—|–|\s-\s)\s*([\s\S]+?)\s*$/) ?? s.match(/^\s*(.+?)\s*\(([\s\S]+)\)\s*$/);
+  return m ? [m[1], m[2]] : [s.trim(), ""];
+}
+
+const Screen = z.preprocess(
+  (v) => (typeof v === "string" ? { name: splitLabel(v)[0], purpose: splitLabel(v)[1] } : v),
+  z.object({ name: z.string().min(1), purpose: z.string().default("") }),
+);
+
+const Entity = z.preprocess(
+  (v) => {
+    if (typeof v === "string") v = { entity: splitLabel(v)[0], fields: splitLabel(v)[1] };
+    if (v && typeof v === "object" && typeof (v as { fields?: unknown }).fields === "string") {
+      const fields = (v as { fields: string }).fields;
+      v = { ...v, fields: fields.split(/\s*,\s*/).filter(Boolean) };
+    }
+    return v;
+  },
+  z.object({ entity: z.string().min(1), fields: list(z.string()) }),
+);
+
 export const PlanSchema = z.object({
   summary: z.string().min(1),
-  screens: z.array(z.object({ name: z.string(), purpose: z.string() })).min(1),
-  data: z.array(z.object({ entity: z.string(), fields: z.array(z.string()) })),
+  screens: list(Screen, 1),
+  data: list(Entity),
   agent: z.object({
-    name: z.string(),
-    goal: z.string(),
-    steps: z.array(z.string()).min(1),
-    tools: z.array(z.string()),
+    name: z.string().default("Your agent"),
+    goal: z.string().default(""),
+    steps: list(z.string(), 1),
+    tools: list(z.string()),
   }),
-  rules: z.array(z.string()),
-  integrations: z.array(z.string()),
-  assumptions: z.array(z.string()),
+  rules: list(z.string()),
+  integrations: list(z.string()),
+  assumptions: list(z.string()),
   /** Set by the app when the user edits the plan card; the model never sends it. */
   edited: z.boolean().optional(),
 });
 export type Plan = z.infer<typeof PlanSchema>;
 
-export const QuestionsSchema = z.object({
-  intro: z.string().optional(),
-  questions: z
-    .array(
-      z.object({
-        id: z.string().min(1),
-        question: z.string().min(1),
-        options: z.array(z.string().min(1)).min(2).max(5),
-        allow_other: z.boolean(),
-      }),
-    )
-    .min(1)
-    .max(3),
-});
+/**
+ * Things the app can't work without, typed in rather than picked. A `slack_webhook` is saved
+ * encrypted with the project and never reaches the chat; everything else is answered in the chat.
+ */
+export const FIELD_TYPES = ["slack_webhook", "text", "time"] as const;
+export type FieldType = (typeof FIELD_TYPES)[number];
+
+export const QuestionsSchema = z
+  .object({
+    intro: z.string().optional(),
+    questions: z
+      .array(
+        z.object({
+          id: z.string().min(1),
+          question: z.string().min(1),
+          options: z.array(z.string().min(1)).min(2).transform((o) => o.slice(0, 5)),
+          allow_other: z.boolean().default(true),
+        }),
+      )
+      .max(3)
+      .default([]),
+    fields: z
+      .array(
+        z.object({
+          id: z.string().min(1),
+          label: z.string().min(1),
+          type: z.enum(FIELD_TYPES).catch("text"),
+          placeholder: z.string().optional(),
+        }),
+      )
+      .max(4)
+      // One project has one Slack webhook.
+      .transform((f) => f.filter((x, i) => x.type !== "slack_webhook" || f.findIndex((y) => y.type === "slack_webhook") === i))
+      .optional(),
+  })
+  .refine((q) => q.questions.length + (q.fields?.length ?? 0) > 0, "Ask at least one question.");
 export type Questions = z.infer<typeof QuestionsSchema>;
 
 // Files are strict. The descriptive fields get fallbacks, because some OpenAI-compatible providers
@@ -42,17 +94,22 @@ export type Questions = z.infer<typeof QuestionsSchema>;
 export const WriteFilesSchema = z
   .object({
     checkpoint_label: z.string().optional(),
-    summary: z.array(z.string()).optional(),
+    // Gemini sends a single string here on edit turns; a lone string becomes a one-item list.
+    summary: list(z.string()).optional(),
     files: z
       .array(
         z.object({
-          path: z.string().regex(/^\/[\w\-./]+\.(tsx|ts|css)$/, "path must look like /App.tsx"),
+          // .jsx/.js/.json/.md/.html too, so imported projects can be edited in their own formats.
+          path: z
+            .string()
+            .regex(/^\/[\w\-./]+\.(tsx|ts|jsx|js|mjs|css|json|md|html)$/, "path must look like /App.tsx")
+            .refine((p) => !p.includes("..") && !p.startsWith("/__architect__/"), "path must stay inside the app"),
           content: z.string(),
         }),
       )
       .min(1),
-    deleted: z.array(z.string()).optional(),
-    next_suggestions: z.array(z.string()).optional(),
+    deleted: list(z.string()).optional(),
+    next_suggestions: list(z.string()).optional(),
   })
   .transform((w) => ({
     ...w,
