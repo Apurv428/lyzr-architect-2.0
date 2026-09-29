@@ -5,9 +5,14 @@ import {
   Code2,
   Database,
   FileText,
+  FlaskConical,
+  Globe,
   Headset,
+  LineChart,
+  Mail,
   Mic,
   Palette,
+  Search,
   Target,
   UserPlus,
 } from "lucide-react";
@@ -16,7 +21,7 @@ export type Template = {
   id: string;
   name: string;
   tagline: string;
-  category: "Support" | "Sales" | "HR" | "Knowledge" | "Finance" | "Productivity";
+  category: "Support" | "Sales" | "HR" | "Knowledge" | "Finance" | "Productivity" | "Marketing" | "Research";
   icon: LucideIcon;
   prompt: string;
   accent: string; // tailwind gradient classes
@@ -82,6 +87,56 @@ export const TEMPLATES: Template[] = [
     prompt:
       "Build a meeting summarizer that takes a transcript, extracts decisions and action items with owners, and posts a summary to Slack.",
     accent: "from-cyan-500/25 to-blue-500/10",
+  },
+  {
+    id: "research-assistant",
+    name: "Research assistant",
+    tagline: "Search, synthesise and cite sources on any topic",
+    category: "Research",
+    icon: Search,
+    prompt:
+      "Build a research assistant agent that takes a research question, searches the web for up-to-date sources, synthesises the findings into a structured report with citations, and highlights open questions.",
+    accent: "from-teal-500/25 to-emerald-500/10",
+  },
+  {
+    id: "email-campaign",
+    name: "Email campaign writer",
+    tagline: "Generate personalised outreach emails at scale",
+    category: "Marketing",
+    icon: Mail,
+    prompt:
+      "Build an email campaign assistant that takes a list of leads with company names and roles, generates a personalised cold outreach email for each, and tracks which ones were sent.",
+    accent: "from-orange-500/25 to-red-500/10",
+  },
+  {
+    id: "data-analyst",
+    name: "Data analyst agent",
+    tagline: "Ask questions about your data in plain English",
+    category: "Research",
+    icon: LineChart,
+    prompt:
+      "Build a data analysis agent where I can paste CSV data and ask plain-English questions. It should produce charts, summaries, and highlight anomalies.",
+    accent: "from-blue-500/25 to-indigo-500/10",
+  },
+  {
+    id: "code-reviewer",
+    name: "Code review agent",
+    tagline: "Automated PR reviews with actionable feedback",
+    category: "Productivity",
+    icon: FlaskConical,
+    prompt:
+      "Build a code review agent that takes a GitHub pull request URL, analyses the diff for bugs, security issues and style problems, and posts a structured review comment.",
+    accent: "from-slate-500/25 to-zinc-500/10",
+  },
+  {
+    id: "web-monitor",
+    name: "Web monitor",
+    tagline: "Track any website for changes and send alerts",
+    category: "Productivity",
+    icon: Globe,
+    prompt:
+      "Build a web monitoring agent that checks a list of URLs for changes on a schedule, extracts the relevant content, and sends a Slack alert whenever something important changes.",
+    accent: "from-green-500/25 to-teal-500/10",
   },
 ];
 

@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { SUPABASE_KEY, SUPABASE_URL, isSupabaseConfigured } from "./env";
 
-const PROTECTED_PREFIXES = ["/dashboard", "/onboarding", "/p/", "/import", "/projects", "/metrics", "/agents", "/deployments", "/settings"];
+const PROTECTED_PREFIXES = ["/dashboard", "/onboarding", "/p/", "/import", "/projects", "/metrics", "/agents", "/deployments", "/integrations", "/settings", "/templates", "/marketplace"];
 const AUTH_PAGES = ["/login", "/signup"];
 
 export async function updateSession(request: NextRequest) {

@@ -79,6 +79,22 @@ export default function Home() {
           <HeroPrompt />
         </section>
 
+        <section className="mx-auto max-w-5xl px-4 pb-16 sm:px-8">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {[
+              { value: "11", label: "ready-to-use templates" },
+              { value: "~2 min", label: "from idea to live preview" },
+              { value: "6+", label: "agent frameworks supported" },
+              { value: "Free", label: "to start — no card needed" },
+            ].map(({ value, label }) => (
+              <div key={label} className="rounded-xl border bg-card/60 p-4 text-center">
+                <p className="text-2xl font-semibold tracking-tight text-foreground">{value}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{label}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
         <section id="how" className="mx-auto max-w-6xl px-4 pb-24 sm:px-8">
           <div className="grid gap-4 md:grid-cols-4">
             {STEPS.map(({ icon: Icon, title, body }, i) => (
