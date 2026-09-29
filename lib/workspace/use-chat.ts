@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { toast } from "sonner";
 import type { ChatAction, ChatEvent } from "@/lib/ai/schema";
 import type { Attachment } from "@/lib/attachments";
@@ -8,6 +8,11 @@ import { useWorkspace } from "./store";
 
 export function useChat() {
   const streaming = useWorkspace((s) => s.streaming);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const cancel = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
 
   const send = useCallback(async (action: ChatAction, input?: string, opts?: { retry?: boolean; intent?: "answers" | "skip"; attachments?: Attachment[] }) => {
     const store = useWorkspace.getState();
@@ -25,11 +30,15 @@ export function useChat() {
     }
     store.set({ streaming: true, liveText: "", status: "Thinking…" });
 
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectId: store.projectId, action, input, retry: opts?.retry, intent: opts?.intent, attachments: opts?.attachments }),
+        signal: controller.signal,
       });
       if (!res.ok || !res.body) {
         const { error } = await res.json().catch(() => ({ error: "Request failed" }));
@@ -49,15 +58,17 @@ export function useChat() {
         }
       }
     } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return; // User cancelled — no toast
       toast.error(err instanceof Error ? err.message : "Something went wrong");
       // Drop the optimistic message the server never confirmed.
       useWorkspace.setState((s) => ({ messages: s.messages.filter((m) => !m.id.startsWith("tmp-")) }));
     } finally {
+      abortRef.current = null;
       useWorkspace.getState().set({ streaming: false, liveText: "", status: null });
     }
   }, []);
 
-  return { send, streaming };
+  return { send, cancel, streaming };
 }
 
 function apply(event: ChatEvent) {

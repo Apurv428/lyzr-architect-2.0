@@ -33,10 +33,22 @@ export function ChatPanel() {
   const mode = useWorkspace((s) => s.mode);
   const liveText = useWorkspace((s) => s.liveText);
   const status = useWorkspace((s) => s.status);
-  const { send, streaming } = useChat();
+  const { send, cancel, streaming } = useChat();
   const composer = useRef<ComposerHandle>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const states = useMemo(() => planStates(messages), [messages]);
+
+  // ⌘. / Ctrl+. — stop generation
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "." && streaming) {
+        e.preventDefault();
+        cancel();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [streaming, cancel]);
 
   const lastChanges = [...messages].reverse().find((m) => m.kind === "changes" || m.role === "user");
   const suggestions =

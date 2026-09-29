@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { ArrowLeft, GitBranch, Rocket, Share2, Zap } from "lucide-react";
+import { ArrowLeft, GitBranch, Rocket, Settings, Share2, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { LogoMark } from "@/components/brand/logo";
 import { ModeToggle } from "@/components/app/mode-toggle";
@@ -73,6 +73,11 @@ export function TopBar() {
         <span className="hidden sm:contents">
           <ThemeToggle />
         </span>
+        <Link href={`/p/${projectId}/settings`} aria-label="Project settings">
+          <Button variant="ghost" size="icon-sm">
+            <Settings />
+          </Button>
+        </Link>
         <CheckpointsMenu />
         <Button variant="ghost" size="sm" onClick={() => setPublishOpen(true)} disabled={checkpoints.length === 0}>
           <GitBranch /> <span className="hidden sm:inline">{githubRepo ? "Open PR" : "GitHub"}</span>

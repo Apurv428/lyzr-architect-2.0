@@ -68,18 +68,24 @@ export async function deleteProject(id: string) {
 }
 
 /** Copies the project, its latest checkpoint and its agent — not the chat or deployments. */
-export async function duplicateProject(id: string) {
+export async function duplicateProject(id: string, customName?: string, fromCheckpointId?: string) {
   const { supabase } = await getUser();
+
+  const checkpointQuery = fromCheckpointId
+    ? supabase.from("checkpoints").select("label, files").eq("id", fromCheckpointId).eq("project_id", id).maybeSingle()
+    : supabase.from("checkpoints").select("label, files").eq("project_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+
   const [{ data: source }, { data: checkpoint }, { data: agent }] = await Promise.all([
     supabase.from("projects").select("name, description, prompt, mode, template_id, framework, github_repo, github_branch").eq("id", id).single(),
-    supabase.from("checkpoints").select("label, files").eq("project_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    checkpointQuery,
     supabase.from("agents").select("name, framework, model, graph").eq("project_id", id).limit(1).maybeSingle(),
   ]);
   if (!source) return { error: "Project not found" };
 
+  const copyName = (customName ?? `Copy of ${source.name}`).slice(0, 80);
   const { data: copy, error } = await supabase
     .from("projects")
-    .insert({ ...source, name: `Copy of ${source.name}`.slice(0, 80), status: checkpoint ? "ready" : "draft" })
+    .insert({ ...source, name: copyName, status: checkpoint ? "ready" : "draft" })
     .select("id")
     .single();
   if (error || !copy) return { error: error?.message ?? "Could not duplicate" };

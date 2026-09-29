@@ -1,13 +1,96 @@
 "use client";
 
-import { forwardRef, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { ArrowUp, BookOpen, HelpCircle, ListChecks, Loader2, Rocket, Wrench } from "lucide-react";
+import { forwardRef, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { ArrowUp, BookOpen, HelpCircle, Library, ListChecks, Loader2, Rocket, Wrench, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import type { Attachment } from "@/lib/attachments";
 import { useWorkspace } from "@/lib/workspace/store";
 import { AttachButton, PendingChips, useAttachments } from "./attachments";
 import { cn } from "@/lib/utils";
+
+const PROMPT_LIBRARY: { category: string; prompts: { label: string; text: string }[] }[] = [
+  {
+    category: "Start from scratch",
+    prompts: [
+      { label: "Support ticket triage dashboard", text: "Build a support ticket triage agent that classifies tickets by urgency, drafts replies, and shows everything on a filterable dashboard." },
+      { label: "Sales lead qualifier", text: "Build a lead qualification agent that scores inbound leads against our ideal customer profile and drafts a personalised first email." },
+      { label: "Document Q&A (RAG)", text: "Build a document Q&A app where I upload PDFs and the agent answers questions with citations to the exact page it used." },
+      { label: "Meeting summarizer", text: "Build a meeting summarizer that takes a transcript, extracts decisions and action items with owners, and posts a summary to Slack." },
+    ],
+  },
+  {
+    category: "Add to existing app",
+    prompts: [
+      { label: "Add an agent brain", text: "Add an AI agent that can answer user questions using the app's data. It should handle follow-up questions naturally." },
+      { label: "Add a Slack notification", text: "When a key event happens in the app, send a Slack message to the team with the relevant details." },
+      { label: "Add a data table", text: "Add a searchable, sortable table view for the main data in this app." },
+      { label: "Add an email trigger", text: "When a form is submitted, send a confirmation email to the user and a notification to the team." },
+    ],
+  },
+  {
+    category: "Improve & polish",
+    prompts: [
+      { label: "Make it mobile-friendly", text: "Make this app look great on mobile. Fix any layout issues and ensure all interactions work on touch screens." },
+      { label: "Add dark mode", text: "Add a proper dark mode to the app with a toggle button in the header." },
+      { label: "Add empty states", text: "Add nice empty-state illustrations and messages for every list or table that could be empty." },
+      { label: "Add loading skeletons", text: "Add skeleton loading states for all data-fetching areas so the app never feels broken while loading." },
+    ],
+  },
+  {
+    category: "Agent configuration",
+    prompts: [
+      { label: "Make it safer with guardrails", text: "Add guardrails to the agent: redact any personal data in replies, refuse off-topic questions politely, and never make promises about refunds or pricing." },
+      { label: "Add web search capability", text: "Give the agent the ability to search the web for up-to-date information before answering questions." },
+      { label: "Add a knowledge base", text: "Let me upload PDF documents for the agent to use as a knowledge base. It should cite the source and page number in every answer." },
+      { label: "Multi-step workflow", text: "Redesign the agent to handle a multi-step workflow: first understand the user's request, then gather the right information, then take action, then confirm with the user." },
+    ],
+  },
+];
+
+function PromptLibraryPopover({ onSelect }: { onSelect: (text: string) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title="Prompt library"
+        className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
+      >
+        <Library className="size-3.5" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute bottom-full left-0 z-50 mb-2 w-80 overflow-hidden rounded-xl border bg-popover shadow-xl">
+            <div className="flex items-center justify-between border-b px-3 py-2">
+              <span className="text-xs font-semibold">Prompt library</span>
+              <button onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground"><X className="size-3.5" /></button>
+            </div>
+            <div className="max-h-80 overflow-y-auto">
+              {PROMPT_LIBRARY.map((group) => (
+                <div key={group.category}>
+                  <p className="sticky top-0 bg-popover px-3 py-1.5 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">{group.category}</p>
+                  {group.prompts.map((p) => (
+                    <button
+                      key={p.label}
+                      type="button"
+                      onClick={() => { onSelect(p.text); setOpen(false); }}
+                      className="w-full px-3 py-2 text-left text-sm hover:bg-muted/60"
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 const COMMANDS = [
   { cmd: "/plan", label: "Re-plan", hint: "Propose a new plan for a change in direction", icon: ListChecks, fill: "Propose a new plan: " },
@@ -19,8 +102,13 @@ const COMMANDS = [
 
 export type ComposerHandle = { focusWith: (text: string) => void };
 
+const noSubscribe = () => () => {};
+// The modifier key users actually press: ⌘ on Apple devices, Ctrl elsewhere (⌘ while rendering on the server).
+const useModKey = () => useSyncExternalStore(noSubscribe, () => (/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+"), () => "⌘");
+
 export const Composer = forwardRef<ComposerHandle, { onSend: (text: string, attachments?: Attachment[]) => void; busy: boolean }>(
   function Composer({ onSend, busy }, ref) {
+    const mod = useModKey();
     const files = useAttachments();
     const draft = useWorkspace((s) => s.draft);
     const mode = useWorkspace((s) => s.mode);
@@ -110,7 +198,10 @@ export const Composer = forwardRef<ComposerHandle, { onSend: (text: string, atta
                   return;
                 }
               }
-              if (e.key === "Enter" && !e.shiftKey) {
+              // ⌘Enter or Enter (without Shift) both send the message
+              const cmdEnter = (e.metaKey || e.ctrlKey) && e.key === "Enter";
+              const plainEnter = e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey;
+              if (cmdEnter || plainEnter) {
                 e.preventDefault();
                 submit();
               }
@@ -121,7 +212,8 @@ export const Composer = forwardRef<ComposerHandle, { onSend: (text: string, atta
           <div className="flex items-center justify-between">
             <span className="flex items-center gap-1">
               <AttachButton onFiles={files.add} disabled={busy} />
-              <span className="hidden text-[11px] text-muted-foreground sm:inline">Paste or drop a screenshot · Enter to send</span>
+              <PromptLibraryPopover onSelect={(text) => { setDraft(text); textarea.current?.focus(); }} />
+              <span className="hidden text-[11px] text-muted-foreground sm:inline">Paste or drop a screenshot · Enter to send · {mod}. to stop</span>
             </span>
             <Button size="icon-sm" aria-label="Send" onClick={submit} disabled={(!draft.trim() && !files.ready.length) || busy || files.uploading}>
               {busy ? <Loader2 className="animate-spin" /> : <ArrowUp />}
