@@ -52,7 +52,14 @@ export function AuthForm({ variant, next }: { variant: "login" | "signup"; next:
           <Input id="email" name="email" type="email" placeholder="you@company.com" autoComplete="email" required className="h-10" />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="password">Password</Label>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="password">Password</Label>
+            {isLogin && (
+              <Link href="/forgot-password" className="text-xs text-muted-foreground underline-offset-4 hover:underline hover:text-foreground">
+                Forgot password?
+              </Link>
+            )}
+          </div>
           <Input
             id="password"
             name="password"

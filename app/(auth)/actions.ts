@@ -47,3 +47,29 @@ export async function signOut() {
   await supabase.auth.signOut();
   redirect("/login");
 }
+
+export async function requestPasswordReset(_: AuthState, formData: FormData): Promise<AuthState> {
+  if (!isSupabaseConfigured) return { error: NOT_CONFIGURED };
+  const email = String(formData.get("email") ?? "").trim();
+  if (!email) return { error: "Please enter your email address." };
+  const supabase = await createClient();
+  const origin = (await headers()).get("origin") ?? process.env.NEXT_PUBLIC_APP_URL;
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${origin}/auth/callback?next=${encodeURIComponent("/reset-password")}`,
+  });
+  // Return the same message regardless of whether the email exists — avoids enumeration.
+  if (error) console.error("[forgot-password]", error.message);
+  return { message: "If an account exists for that address, we've sent a reset link. Check your inbox." };
+}
+
+export async function updatePassword(_: AuthState, formData: FormData): Promise<AuthState> {
+  if (!isSupabaseConfigured) return { error: NOT_CONFIGURED };
+  const password = String(formData.get("password") ?? "");
+  const confirm = String(formData.get("confirm") ?? "");
+  if (password.length < 6) return { error: "Password must be at least 6 characters." };
+  if (password !== confirm) return { error: "Passwords don't match." };
+  const supabase = await createClient();
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) return { error: error.message };
+  redirect("/dashboard");
+}
