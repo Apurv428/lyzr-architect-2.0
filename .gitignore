@@ -49,3 +49,8 @@ next-env.d.ts
 
 # Supabase CLI local state
 /supabase/.temp/
+
+# Private submission and audit files (not for the repo)
+/REMAINING.md
+/SUBMISSION.md
+/ASSIGNMENT-AUDIT.md

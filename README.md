@@ -53,104 +53,71 @@ The same person can be non-technical about deployment and technical about prompt
 
 ## 5. Feature map: what's real vs. simulated
 
-All eight required features are present. I'd rather be explicit than let a demo overclaim.
+All eight required features are present. I'd rather be explicit than let a demo overclaim. "Needs migration NNNN" means the feature works once that SQL file in `supabase/migrations/` has been run.
 
 | Feature | Status | Notes |
 |---|---|---|
-| **Authentication** (email, Google, GitHub) | ✅ Real | Supabase Auth; row-level security on every table |
-| **Homepage / dashboard** | ✅ Real | Prompt box with mode switch, templates, recent projects |
-| **Chat window** | ✅ Real | Claude (`claude-opus-5`) **or OpenAI** (`gpt-5.5`), streaming; tool calls for `propose_plan` / `write_files`; schema-validated before anything is saved |
-| Clarifying questions (Guided) | ✅ Real | When a request is vague, the AI asks up to 3 one-click multiple-choice questions before planning (`ask_questions` tool); skippable; `/ask` in Pro |
-| Editable plan card | ✅ Real | Edit screens, agent steps (drag to reorder), data, rules, integrations and assumptions inline; the build follows the edited plan |
-| Screenshot / document → app | ✅ Real | Attach, paste or drop up to 3 images, PDFs or text files; images are downscaled in the browser, stored privately per user, and sent to Claude or GPT as images/documents until a build has used them |
-| **App preview** | ✅ Real | Sandpack runs the generated React + Tailwind app in the browser; device sizes; open in new tab |
-| **UI building** | ✅ Real | Select-to-edit in the preview, Monaco editor, diffs, manual edits |
-| **Agent section** | ✅ Real | React Flow canvas, settings for each block, autosave, live test console with trace |
-| — web search tool | ✅ Real on Claude | Anthropic server-side web search; simulated when the agent runs on OpenAI |
-| — Slack (`Post to Slack` action) | ✅ Real | Save an incoming webhook URL in the Action block; the trace shows **live** |
-| — email / CRM / ticket / SQL / HTTP tools | 🟡 Simulated | Realistic responses, labelled "simulated" in the trace |
-| — knowledge files (PDF / TXT / MD) | ✅ Real | Text extracted per page on upload (`unpdf`), split into passages and ranked per question with BM25; the answer cites file and page, and the trace shows what was retrieved |
-| — PII redaction guardrail | ✅ Real | Masks emails, phone numbers and card numbers in agent replies |
-| — framework code (LangGraph, CrewAI, OpenAI Agents SDK, Claude Agent SDK, Google ADK, Lyzr blueprint) | 🟡 Generated starter | Kept in sync with the canvas; not executed by the platform |
-| **GitHub integration** | ✅ Real | Repo listing, stack detection, new-repo push, **real branch + commit + pull request** |
-| **Deployment** | ✅ Real link | The checkpoint is frozen to a public `/s/<slug>` URL; preview/prod; rollback. Build logs are staged for UX. |
-| Checkpoints & restore | ✅ Real | Non-destructive restore |
-| Credits / usage | ✅ Real | 100 credits/day, refilled and spent only through database functions (clients can't edit balances); token and latency charts from real runs |
-| Project thumbnails | ✅ Real | The sandbox renders its own viewport to a JPEG after each new version; stored in a public bucket and shown on dashboard cards |
-| Project management | ✅ Real | Rename, duplicate (latest checkpoint + agent), delete with typed confirmation for live apps; searchable `/projects` |
-| Settings & bring-your-own keys | ✅ Real | Profile, default mode and dial, theme; Anthropic/OpenAI keys verified with the provider, stored encrypted, used instead of platform credits |
-| Product metrics | ✅ Real | 15 server-side events → admin `/metrics`: activation funnel, plan approval rate, restores per project, Guided⇄Pro switches, weekly deployed apps (North Star) |
-| Custom domains | 🟡 Mock | Saved and shown as "waiting for DNS" |
-| **Evals** | ✅ Real | Saved test cases per agent — *contains*, *doesn't contain*, or *AI judge* (the same provider at low effort answers PASS/FAIL with a reason); Run all streams verdicts with progress, keeps pass-rate history, and runs the canvas as it is now, so a rule change can be checked immediately; **Save as test** from any console run. AI-judged checks are skipped (not guessed) in demo mode |
-| **Agent API** | ✅ Real | Per-agent keys (`arc_live_…`, shown once, stored as SHA-256 hashes, revocable); `POST /api/v1/agents/:id/run` returns `{ output, trace, tokens, latency_ms }`; 60 requests/min per key counted in Postgres; runs through the same runner as the test console; no service-role key (security-definer RPCs) |
-| First-run tour | ✅ Real | Guided and Pro versions; spotlight never blocks clicks and never covers its target; keyboard (←, →, Esc); steps whose target isn't on screen are skipped (e.g. on phones); once per user (`profiles.tour_completed` + local fallback); **Replay tour** in Settings |
-| Team invites | ⏳ Coming soon | Labelled in the UI |
+| **Authentication** | ✅ Real | Email/password with password reset, Google; Supabase Auth with row-level security on every table. GitHub is used to connect repos (OAuth once configured in Supabase, or a personal access token) |
+| **Homepage / dashboard** | ✅ Real | Prompt box with mode switch, templates page, recent projects, "Shared with you", command palette (⌘K) |
+| **Chat window** | ✅ Real | Streaming via `@anthropic-ai/sdk` (Claude) or any OpenAI-compatible endpoint (this deployment runs on Gemini); typed tools `ask_questions` / `propose_plan` / `write_files`, validated before anything is saved; stop with ⌘. |
+| Clarifying questions | ✅ Real | Up to 3 one-click questions, plus typed-in fields when the app needs a connection: a Slack webhook (saved encrypted, never shown in chat), times, text |
+| Editable plan card | ✅ Real | Edit screens, agent steps (drag to reorder), data, rules, integrations and assumptions; the build follows the edited plan |
+| Screenshot / document → app | ✅ Real | Up to 3 images, PDFs or text files per message, stored privately per user |
+| Brand design system | ✅ Real · needs 0016 | Settings → Design system reads CSS variables or design-token JSON (Figma variable exports too); every build uses your colours, fonts and radius |
+| **App preview** | ✅ Real | Sandpack in the browser (device sizes, full-page view); WebContainer runs the same app as a real Vite project; E2B is wired but needs a key |
+| **UI building** | ✅ Real | Select-to-edit, Auto-fix, Monaco editor with diffs, manual edits become checkpoints, branch a new project from any checkpoint |
+| Generated apps that act | ✅ Real | Apps call `postToSlack()` from the platform helper; the owner's clicks post to the real channel, everyone else's are simulated |
+| **Agent section** | ✅ Real | React Flow canvas, per-block settings, autosave, test console with a step-by-step trace |
+| — models | ✅ Real | Claude Opus 5 / Sonnet 5 / Haiku 4.5, GPT-5.5, Gemini, Llama (any OpenAI-compatible host); bring your own keys in Settings |
+| — tools | ✅ / 🟡 | Live: web search (Claude), Slack, **MCP servers** (any Streamable-HTTP server; tokens encrypted). The other 25+ catalog tools (Notion, Jira, HubSpot…) return realistic results labelled "simulated" |
+| — knowledge files | ✅ Real | PDF/TXT/MD split into passages; keyword (BM25) ranking, plus semantic search with pgvector once migration 0010 is in; answers cite file and page |
+| — multi-agent | ✅ Real | A Coordinator block delegates to Specialist agents; the trace shows each hand-off |
+| — guardrails | ✅ Real | Rules in the prompt, "Safe AI" presets, PII redaction on replies |
+| — schedules | ✅ Real · needs 0017 + cron | Trigger "Schedule": times, weekdays and timezone; runs on time through `/api/cron/schedules` (see docs/ARCHITECTURE.md §10) |
+| — framework code | 🟡 Generated starter | LangGraph, CrewAI, OpenAI Agents SDK, Claude Agent SDK, Google ADK, Lyzr blueprint; kept in sync with the canvas, export-only |
+| **Evals** | ✅ Real | Saved tests (contains / doesn't contain / AI judge), pass-rate history, **Simulate** (6 adversarial scenarios against the live agent), suggested tests sampled from real traffic (needs 0014) |
+| **Agent API** | ✅ Real | Per-agent keys (`arc_live_…`, SHA-256 hashed, revocable), 60 requests/min, cURL/JS/Python snippets |
+| **Inbound webhooks** | ✅ Real | Integrations page: a secret URL per agent, pause, rotate, recent calls, optional HMAC-signed forward of the result |
+| **GitHub integration** | ✅ Real | Connect, list repos, detect the stack, **import the repo's real files**, push a new repo, open pull requests that change the real files; GitAgent sets branch prefix, commit style and PR conventions |
+| ZIP import / export | ✅ Real | Upload a local project as a ZIP; "Download" exports a runnable Vite project (`npm install && npm run dev`) |
+| **Deployment** | ✅ Real link | A frozen checkpoint at `/s/<slug>`; preview/production, promote/rollback, rename the link, QR code, encrypted env vars. Build logs are staged; custom-domain DNS and VPC deploy are mock |
+| Team workspaces | ✅ Real · needs 0011 | Workspaces, roles, invite links (bound to the invited email, SSO domain enforced), read-only sharing of projects, pinned comments on the preview |
+| Artifacts | ✅ Real | Project report, deck outline, product spec and data-model CSV, built from the project's actual plan, agent and files |
+| Checkpoints & restore | ✅ Real | Non-destructive restore; branch a project from any checkpoint |
+| Credits / usage | ✅ Real | 100 credits/day, spent only through database functions; your own keys bypass credits |
+| Thumbnails, project management, settings, tour, metrics | ✅ Real | Rename, duplicate, typed-name delete; first-run tour per mode; admin `/metrics` funnel |
+| Marketplace | 🟡 Preview | Browsable blueprints that start a project; listing stats are sample data and labelled so |
 | Pricing | 🟡 Illustrative | |
-| Demo mode | ✅ | Without an Anthropic key, the build flow is scripted so the demo never breaks |
+| Demo mode | ✅ | Without any model key the build flow is scripted, so the demo never breaks |
 
 ## 6. Architecture
 
-```mermaid
-flowchart LR
-  subgraph Browser
-    UI[Next.js app<br/>Guided / Pro UI]
-    SP[Sandpack preview<br/>+ element inspector]
-    RF[React Flow<br/>agent canvas]
-  end
-  subgraph "Next.js server (Vercel)"
-    CHAT[/api/chat<br/>NDJSON stream/]
-    TEST[/api/agents/test<br/>tool loop + trace/]
-    DEP[/api/deploy/]
-    API[/api/v1/agents/:id/run<br/>API-key auth/]
-    ACT[Server actions<br/>projects · checkpoints · agents · GitHub]
-  end
-  UI --> CHAT --> LLM[(Claude or OpenAI)]
-  RF --> TEST --> LLM
-  API --> LLM
-  ACT --> GH[(GitHub REST)]
-  CHAT & TEST & DEP & ACT & API --> DB[(Supabase<br/>Postgres + Auth + RLS)]
-  PUB[/s/:slug public app/] --> DB
-```
+![Architecture diagram](docs/architecture-diagram.svg)
 
-**From prompt to running app — step by step**
+The full design is in **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)**. It covers:
+- the step-by-step path from a prompt to a running app;
+- sandboxes (today: Sandpack and WebContainer; production: Firecracker microVMs behind a preview ingress proxy);
+- the agent harness and the agent runtime, including MCP;
+- the model-agnostic layer and its capability matrix;
+- frontend ↔ backend ↔ sandbox protocols;
+- the three meanings of "proxy";
+- GitHub, deployment, background work and security;
+- scaling to thousands of concurrent builders.
 
-1. **User types a prompt and hits Send.**
-   The Zustand workspace store adds an optimistic user message, disables the composer, and POSTs to `/api/chat` with the project ID, the mode (`guided`/`pro`), and the full conversation history (most recent turn in the last message so the earlier turns hit Anthropic's prompt cache).
-
-2. **The route builds context and calls the model.**
-   `/api/chat/route.ts` runs as a Vercel Edge Function. It reads the latest checkpoint from Supabase (`checkpoints` row → `files jsonb`), assembles the system prompt (mode rules, file-tree contract, design style guide, allowed dependencies), appends the current files as the last user message, and calls `streamText` from the Vercel AI SDK with three tools registered: `ask_questions`, `propose_plan`, and `write_files`. The request goes to Claude (`claude-opus-5`) or OpenAI (`gpt-5.5`) depending on the user's provider preference.
-
-3. **The model streams back and tool calls are parsed live.**
-   The route returns an NDJSON stream. As tokens arrive the client renders them as streaming text. When the model opens a tool-call block the route accumulates the JSON argument string and — once the block closes and the argument passes its Zod schema — calls `applyToolCall`:
-   - `ask_questions` → saves a `questions` message to Supabase and emits a structured JSON event; the client renders a `QuestionsCard`.
-   - `propose_plan` → saves a `plan` message; the client renders a `PlanCard` with Approve / Refine buttons.
-   - `write_files` → saves a new `checkpoints` row (`files jsonb` keyed by path), emits each filename as a progress event; the client renders a `ProgressCard` with live ticks, then a `ChangesCard` with the change summary bullets.
-
-4. **The user approves the plan.**
-   Clicking Approve sends the next turn: `"Plan approved. Build it."` The model calls `write_files` with the full file set. The checkpoint row is written atomically; the server action `createCheckpoint` uses a Postgres function (not the anon client) so the file blob is never sent to the browser.
-
-5. **The preview re-renders.**
-   The client's Zustand store receives the new checkpoint over the stream and calls `updateSandpackFiles`. Sandpack (running in a cross-origin iframe) transpiles and runs the new React + Tailwind bundle in the browser — no build server, no round trip. Device-size toggles change the iframe's `width` CSS; Select mode injects a `postMessage` inspector script that highlights hovered elements and fires `architect:select` events back to the parent.
-
-6. **The user clicks an element and says "make the header dark."**
-   The Select-mode overlay receives the `architect:select` event, extracts the element's class list and text, and pre-fills the composer: *"Change the header (className: `bg-white text-gray-900`) to dark."* This becomes the next chat turn. The model calls `write_files` again with only the changed file; the diff view in the Code tab computes the delta against the previous checkpoint client-side with `diff`.
-
-7. **The user hits Deploy.**
-   The Deploy tab POSTs to `/api/deploy`. The route creates a `deployments` row with `is_current = true` (flipping the previous one to false), copies the checkpoint's `files jsonb` into `deployments.files`, generates a random slug, and streams staged log lines (install → build → optimise → upload) over SSE for the UX. The public route `/s/[slug]/page.tsx` reads `deployments.files` with the Supabase service role (no auth required) and serves the frozen snapshot. Rollback = `UPDATE deployments SET is_current = true WHERE id = $prev`.
-
-**Stack:** Next.js 16 (App Router, `proxy.ts`), TypeScript, Tailwind v4, shadcn/ui (Base UI), Framer Motion, Supabase, `@anthropic-ai/sdk` + `openai` (model-agnostic provider layer), Sandpack, Monaco, React Flow, Zustand.
+**Stack:** Next.js 16 (App Router, `proxy.ts`), React 19, TypeScript, Tailwind v4, shadcn/ui (Base UI), Framer Motion, Zustand, Supabase (Postgres, Auth, Storage, pgvector), `@anthropic-ai/sdk` + `openai`, Sandpack, WebContainer, Monaco, React Flow.
 
 **Design choices worth calling out**
-- **Tool calls instead of free-text code.** The model returns a plan or complete files through typed tools with streamed input, so progress ("Writing /App.tsx") shows as it happens. Nothing is saved unless it passes a Zod schema.
-- **A tight contract for generated apps:** a React + Tailwind single-page app with seeded data and a simulated agent. It renders instantly in the browser with no build servers, which is the right trade-off for a first version.
-- **Byte-stable system prompt with prompt caching.** Per-turn context (mode, files, repo summary) goes in the last message, so the prefix stays cached across turns.
-- **Deploy = a frozen checkpoint.** The public page reads a snapshot, so a live app never changes under a user's feet, and rollback is just changing which snapshot is current.
+- **Typed tool calls instead of free-text code.** Nothing is saved unless it passes a schema, every write is a restorable checkpoint, and models that narrate are forced to act.
+- **No privileged key anywhere.** Signed-in calls use row-level security. The public endpoints (agent API, webhooks, scheduler) go through security-definer functions that check a hashed token or secret and return only what it unlocks.
+- **Byte-stable system prompt,** so the prefix caches across turns. Per-turn state goes in the last message.
+- **Deploy = a frozen checkpoint,** so a live app never changes under a user's feet, and rollback is just choosing a different snapshot.
 
-**Security:** row-level security on every table; clients can't write their own credit balance; GitHub tokens (cookie) and env-var values (database) are AES-256-GCM encrypted with `ARCHITECT_SECRET`; post-login redirects accept only same-origin paths; generated apps run in a cross-origin sandbox iframe.
+**Tests:**
+- `npm test` runs Vitest: 136 unit tests. They cover schemas, imports and ZIP files, the tool catalog, MCP (protocol against a mocked server), model routing, generated code, design tokens, GitAgent, artifacts, webhooks, evals, retrieval, encryption and redirects.
+- `npm run test:e2e` runs Playwright on desktop and mobile.
+- The SQL migrations are checked on a local Postgres: 69 checks of access rules, invites, sharing, webhooks, sampling and scheduling.
 
-**Tests:** `npm test` (Vitest: 58 unit tests covering redirect safety, encryption, agent compilation, PII redaction, code generation, builder schemas, repo parsing, retrieval, API keys, eval grading, tour placement) and `npm run test:e2e` (Playwright on desktop + mobile: public pages, auth gating, open-redirect protection, agent API auth, no horizontal overflow).
-
-**Data model (Postgres, RLS on every table):** `profiles`, `projects`, `messages`, `checkpoints (files jsonb)`, `agents (graph jsonb)`, `agent_runs (trace jsonb)`, `deployments (files snapshot, slug, is_current)`, `env_vars`, `events`, `user_secrets`, `admins`, `knowledge_docs`, `api_keys`, `eval_cases`, `eval_runs`. See `supabase/migrations/`.
+**Data model:** see `supabase/migrations/` (0001–0017). Every table has row-level security.
 
 ## 7. What I'd measure
 
@@ -163,21 +130,35 @@ flowchart LR
 
 ## 8. What I left out on purpose, and what's next
 
-- **Full-stack runtimes** (a real backend per app via E2B or WebContainers). The sandbox contract was chosen for instant, reliable previews in a first version.
-- **Multi-agent orchestration** (a manager block over sub-agents), and evals on real traffic (sampling production API runs into test cases).
-- **Real integrations** behind the simulated tools (OAuth connectors for Slack, Gmail, HubSpot).
-- **Team workspaces**, roles, comments on the preview, SSO.
+- **An autonomous build loop.** That means a terminal and a browser tool inside a microVM, with a step budget. Today the user stays in the loop, with plan approval and Auto-fix.
+- **Remote sandboxes in production.** The E2B route boots a sandbox but doesn't upload files yet. The design is in docs/ARCHITECTURE.md §3.
+- **Editing shared projects by teammates.** Workspace members can view and comment today; editing stays with the owner.
+- **OAuth connectors** for Slack, Gmail and HubSpot (built, needs each provider's client ID and migration 0012). Slack also works today through incoming webhooks.
+- **A real build pipeline and custom domains** for deployed apps.
 
 ## 9. Run it locally
 
 ```bash
-cp .env.example .env.local      # Supabase URL + anon key, ARCHITECT_SECRET, and optionally an Anthropic or OpenAI key
+cp .env.example .env.local      # Supabase URL + anon key, ARCHITECT_SECRET, and a model key (Anthropic, OpenAI, or Gemini via OPENAI_BASE_URL)
 npm install
-# apply the SQL in supabase/migrations/ (SQL editor or `supabase db push`)
-npm run dev
+npm run dev                     # http://localhost:3000
 ```
 
-Supabase settings: Site URL = your app URL; redirect URLs = `http://localhost:3000/**` and your production URL. For GitHub sign-in, create a GitHub OAuth App with callback `https://<project-ref>.supabase.co/auth/v1/callback`.
+**Database.** Run every file in `supabase/migrations/` in order, `0001` → `0017`, in the Supabase SQL editor, or use `supabase db push`. Run `0001`–`0009` once; `0010` onwards are safe to re-run.
+
+**Supabase Auth settings:**
+- **Site URL:** your app's URL.
+- **Redirect URLs:** `http://localhost:3000/**` and your production URL.
+- **Email confirmation:** turn it off for demos.
+
+**GitHub.** To connect with OAuth, create a GitHub OAuth App with the callback `https://<project-ref>.supabase.co/auth/v1/callback`, then enable the GitHub provider in Supabase. Without it, users can still connect with a personal access token.
+
+**Scheduled agents:**
+1. After migration 0017, run `select secret from private.scheduler_secret;`.
+2. Set the result as `CRON_SECRET`.
+3. Call `GET /api/cron/schedules` every minute with `Authorization: Bearer <CRON_SECRET>`. Supabase pg_cron is the simplest way; the SQL is in docs/ARCHITECTURE.md §10.
+
+**Checks:** `npm run typecheck`, `npm run lint` and `npm test`.
 
 ---
 

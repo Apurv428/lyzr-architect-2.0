@@ -244,7 +244,8 @@ type WorkspaceFixtures = {
 };
 
 export const test = base.extend<WorkspaceFixtures>({
-  workspacePage: async ({ page }, use) => {
+  // Playwright calls the fixture callback "use"; renamed so the React hooks lint rule leaves it alone.
+  workspacePage: async ({ page }, provide) => {
     // 1. Mock the chat API before navigating (avoids race with "start" action).
     await mockChat(page);
 
@@ -259,7 +260,7 @@ export const test = base.extend<WorkspaceFixtures>({
     // 4. Wait for the questions card (or plan card) from the mock.
     await page.waitForSelector('[data-message-kind="questions"],[data-message-kind="plan"]', { timeout: 15_000 }).catch(() => {});
 
-    await use(page);
+    await provide(page);
   },
 });
 

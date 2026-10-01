@@ -8,13 +8,9 @@
 import { expect, test as base, type Page } from "@playwright/test";
 import {
   mockChat,
-  mockDeploy,
-  PLAN_STREAM,
   BUILD_STREAM,
   ERROR_STREAM,
-  QUESTIONS_STREAM,
   MOCK_PLAN,
-  APP_TSX,
 } from "./fixtures";
 
 // ─── workspace setup helper ──────────────────────────────────────────────────
