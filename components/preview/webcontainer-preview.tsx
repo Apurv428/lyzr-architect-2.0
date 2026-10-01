@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { Loader2, RefreshCw, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { FileMap } from "@/lib/ai/schema";
+import { toFileTree, viteProject } from "@/lib/workspace/scaffold";
+import { useWorkspace } from "@/lib/workspace/store";
 
 type BootPhase = "idle" | "booting" | "installing" | "starting" | "ready" | "error";
 
@@ -29,7 +31,8 @@ async function bootWebContainer(): Promise<WCInstance> {
   return mod.WebContainer.boot();
 }
 
-export function WebContainerPreview({ files, projectId, onReady }: Props) {
+export function WebContainerPreview({ files, onReady }: Props) {
+  const name = useWorkspace((s) => s.name);
   const [phase, setPhase] = useState<BootPhase>("idle");
   const [url, setUrl] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
@@ -48,31 +51,13 @@ export function WebContainerPreview({ files, projectId, onReady }: Props) {
     setPhase("booting");
 
     try {
+      // Only one WebContainer can run per page, so a restart tears the old one down first.
+      instance.current?.teardown?.();
+      instance.current = null;
       const container = await bootWebContainer();
 
-      // Mount files.
-      const mountTree: Record<string, { file: { contents: string } }> = {};
-      for (const [path, content] of Object.entries(files)) {
-        const key = path.startsWith("/") ? path.slice(1) : path;
-        mountTree[key] = { file: { contents: typeof content === "string" ? content : JSON.stringify(content) } };
-      }
-
-      // Ensure a minimal package.json with a dev script exists.
-      if (!mountTree["package.json"]) {
-        mountTree["package.json"] = {
-          file: {
-            contents: JSON.stringify({
-              name: "architect-preview",
-              private: true,
-              scripts: { dev: "vite --port 3000" },
-              dependencies: { react: "^18.3.1", "react-dom": "^18.3.1" },
-              devDependencies: { vite: "^5.4.0", "@vitejs/plugin-react": "^4.3.1" },
-            }, null, 2),
-          },
-        };
-      }
-
-      await container.mount(mountTree);
+      // Sandbox-style apps get a Vite entry, index.html and package.json; full-stack apps keep their own.
+      await container.mount(toFileTree(viteProject(files, name)));
 
       setPhase("installing");
       log("$ npm install");
@@ -102,10 +87,14 @@ export function WebContainerPreview({ files, projectId, onReady }: Props) {
     }
   }
 
-  // Boot on mount; tear down on unmount.
+  // Boot on mount (after paint, so the effect itself never sets state); tear down on unmount.
   useEffect(() => {
-    void boot();
-    return () => { instance.current?.teardown?.(); };
+    const timer = setTimeout(() => void boot(), 0);
+    return () => {
+      clearTimeout(timer);
+      instance.current?.teardown?.();
+      instance.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -166,7 +155,8 @@ export function WebContainerPreview({ files, projectId, onReady }: Props) {
 }
 
 /** E2B-backed preview: creates a cloud sandbox and returns an iframe to its URL. */
-export function E2BPreview({ files, projectId }: Props) {
+// Note: the E2B route boots a bare sandbox and does not upload `files` yet; see app/api/e2b/route.ts.
+export function E2BPreview({ projectId }: Props) {
   const [sandboxUrl, setSandboxUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -193,8 +183,9 @@ export function E2BPreview({ files, projectId }: Props) {
   }
 
   useEffect(() => {
-    void start();
+    const timer = setTimeout(() => void start(), 0);
     return () => {
+      clearTimeout(timer);
       if (sandboxId.current) {
         void fetch("/api/e2b", {
           method: "DELETE",

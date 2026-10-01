@@ -162,7 +162,7 @@ export function ImportWizard({ connected: initiallyConnected, login: initialLogi
                   </button>
                 ))}
               </div>
-              <p className="text-xs text-muted-foreground">Your repo isn’t touched until you open a pull request from the workspace.</p>
+              <p className="text-xs text-muted-foreground">Architect loads the repo’s source files (up to 40) so you keep working on the real code. Your repo isn’t touched until you open a pull request.</p>
             </div>
 
             <div className="flex justify-between">

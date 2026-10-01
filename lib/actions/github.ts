@@ -2,8 +2,8 @@
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { GH_COOKIE, GitHubError, gh, githubCookie, githubToken, inspectRepo, parseRepo, type RepoSummary } from "@/lib/github";
-import { track } from "@/lib/analytics";
+import { GH_COOKIE, GitHubError, fetchRepoFiles, gh, githubCookie, githubToken, inspectRepo, parseRepo, type RepoSummary } from "@/lib/github";
+import { createImportedProject } from "@/lib/import-project";
 import { getUser } from "@/lib/supabase/server";
 
 export type RepoListItem = { fullName: string; description: string | null; isPrivate: boolean; language: string | null; updatedAt: string };
@@ -69,8 +69,17 @@ export async function importRepo(summary: RepoSummary, goal: string) {
   const prompt = goal.trim();
   if (!prompt) return { error: "Tell Architect what to add to this repo." };
 
+  // Bring the repo's own source in, so the project keeps working on the real code.
+  let imported: { files: Record<string, string>; skipped: number };
+  try {
+    imported = await fetchRepoFiles(summary.fullName, summary.branch, await githubToken());
+  } catch (err) {
+    return fail(err);
+  }
+  const count = Object.keys(imported.files).length;
+
   const description = [
-    `Imported from GitHub: ${summary.fullName}@${summary.branch} (${summary.fileCount} files).`,
+    `Imported from GitHub: ${summary.fullName}@${summary.branch} (${summary.fileCount} files; ${count} loaded into Architect).`,
     summary.stack.length ? `Stack: ${summary.stack.join(", ")}.` : "",
     summary.agentLibs.length ? `Existing AI libraries: ${summary.agentLibs.join(", ")}.` : "No AI libraries yet.",
     `Languages: ${summary.languages.map((l) => `${l.name} ${l.share}%`).join(", ")}.`,
@@ -79,26 +88,19 @@ export async function importRepo(summary: RepoSummary, goal: string) {
     .filter(Boolean)
     .join(" ");
 
-  const { data, error } = await supabase
-    .from("projects")
-    .insert({
-      name: summary.fullName.split("/")[1],
-      description,
-      prompt,
-      mode: "pro",
-      framework: summary.suggestedFramework,
-      github_repo: summary.fullName,
-      github_branch: summary.branch,
-      status: "planning",
-    })
-    .select("id")
-    .single();
-  if (error || !data) return { error: error?.message ?? "Could not import." };
-
-  await supabase.from("messages").insert([
-    { project_id: data.id, role: "system", kind: "checkpoint", content: `Imported ${summary.fullName} · ${summary.branch} · ${summary.fileCount} files` },
-    { project_id: data.id, role: "user", kind: "text", content: prompt },
-  ]);
-  await track(supabase, "project_created", { source: "import", stack: summary.stack }, data.id);
-  redirect(`/p/${data.id}`);
+  const res = await createImportedProject(supabase, {
+    name: summary.fullName.split("/")[1],
+    description,
+    prompt,
+    mode: "pro",
+    framework: summary.suggestedFramework,
+    githubRepo: summary.fullName,
+    githubBranch: summary.branch,
+    source: "github",
+    files: imported.files,
+    skipped: imported.skipped,
+    summary: `Imported ${summary.fullName} · ${summary.branch} · ${count} of ${summary.fileCount} files`,
+  });
+  if ("error" in res) return res;
+  redirect(`/p/${res.id}`);
 }

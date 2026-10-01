@@ -1,6 +1,7 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { decrypt, encrypt } from "@/lib/crypto";
+import { pickImportFiles } from "@/lib/workspace/import";
 
 export const GH_COOKIE = "gh_token";
 
@@ -110,6 +111,34 @@ async function readFile(fullName: string, path: string, branch: string, token: s
   } catch {
     return null;
   }
+}
+
+/**
+ * Downloads the repo's readable source (within IMPORT_LIMITS) so an imported project opens with its
+ * real files. Raw downloads don't count against the API rate limit; private repos fall back to the
+ * contents API when raw access is refused.
+ */
+export async function fetchRepoFiles(fullName: string, branch: string, token: string | null) {
+  const tree = await gh<{ tree: { path: string; type: string; size?: number }[] }>(
+    `/repos/${fullName}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+    token,
+  );
+  const blobs = tree.tree.filter((t) => t.type === "blob");
+  const { picked, skipped } = pickImportFiles(blobs.map((t) => ({ path: t.path, size: t.size ?? 0 })));
+  const files: Record<string, string> = {};
+  const queue = [...picked];
+  const ref = branch.split("/").map(encodeURIComponent).join("/");
+  await Promise.all(
+    Array.from({ length: 6 }, async () => {
+      for (let path = queue.shift(); path; path = queue.shift()) {
+        const url = `https://raw.githubusercontent.com/${fullName}/${ref}/${path.split("/").map(encodeURIComponent).join("/")}`;
+        const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {}, cache: "no-store" }).catch(() => null);
+        const text = res?.ok ? await res.text() : await readFile(fullName, path, branch, token);
+        if (text !== null) files[path] = text;
+      }
+    }),
+  );
+  return { files, skipped: skipped + (picked.length - Object.keys(files).length) };
 }
 
 export async function inspectRepo(fullName: string, token: string | null, branchOverride?: string): Promise<RepoSummary> {

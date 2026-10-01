@@ -3,12 +3,14 @@
 import { useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import type { BeforeMount } from "@monaco-editor/react";
-import { Code2, Eye, FileCode2, GitCompareArrows, Loader2, Lock, Save, Undo2 } from "lucide-react";
+import { Code2, Download, Eye, FileCode2, GitCompareArrows, Loader2, Lock, Save, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { saveManualEdit } from "@/lib/actions/checkpoints";
 import { useWorkspace } from "@/lib/workspace/store";
 import { useTheme } from "@/lib/theme";
+import { viteProject } from "@/lib/workspace/scaffold";
+import { downloadZip } from "@/lib/zip";
 import { cn } from "@/lib/utils";
 
 const Editor = dynamic(() => import("@monaco-editor/react").then((m) => m.Editor), { ssr: false, loading: () => <EditorLoading /> });
@@ -44,6 +46,7 @@ type Change = "added" | "modified" | null;
 
 export function CodeTab() {
   const files = useWorkspace((s) => s.files);
+  const name = useWorkspace((s) => s.name);
   const prevFiles = useWorkspace((s) => s.prevFiles);
   const mode = useWorkspace((s) => s.mode);
   const streaming = useWorkspace((s) => s.streaming);
@@ -115,6 +118,9 @@ export function CodeTab() {
           </span>
         )}
         <div className="ml-auto flex items-center gap-1.5">
+          <Button size="xs" variant="ghost" onClick={() => downloadZip(viteProject(files, name), `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "project"}.zip`)} title="Download a runnable project (npm install && npm run dev)">
+            <Download /> <span className="hidden sm:inline">Export ZIP</span>
+          </Button>
           {changedCount > 0 && (
             <Button size="xs" variant={showDiff ? "secondary" : "ghost"} onClick={() => setShowDiff((v) => !v)}>
               <GitCompareArrows /> {showDiff ? "Hide changes" : `Changes (${changedCount})`}

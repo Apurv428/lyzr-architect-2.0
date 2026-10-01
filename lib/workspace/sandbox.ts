@@ -99,11 +99,81 @@ document.addEventListener("click", (e) => {
 export {};
 `;
 
+// Imported by generated apps. The sandbox has no backend, so posts go through the page hosting
+// the preview, which sends them with the project's saved Slack webhook.
+const CONNECTIONS = `export type SlackResult = { ok: boolean; simulated: boolean; error?: string };
+
+/** Posts to the project's Slack channel when Slack is connected; otherwise the post is simulated. */
+export function postToSlack(text: string): Promise<SlackResult> {
+  const id = Math.random().toString(36).slice(2);
+  return new Promise((resolve) => {
+    const done = (result: SlackResult) => {
+      window.removeEventListener("message", onReply);
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const onReply = (e: MessageEvent) => {
+      if (e.data?.type === "architect:slack-result" && e.data.id === id) done(e.data.result);
+    };
+    // Outside Architect nothing answers, so fall back to a simulated post.
+    const timer = setTimeout(() => done({ ok: true, simulated: true }), 12000);
+    window.addEventListener("message", onReply);
+    window.parent.postMessage({ type: "architect:slack", id, text: String(text) }, "*");
+  });
+}
+`;
+
+/** Platform files a generated app may import; exports carry them so the code still builds. */
+export const RUNTIME_FILES: FileMap = { "/__architect__/connections.ts": CONNECTIONS };
+
+const CONNECTIONS_IMPORT = /(["'])[^"'\n]*__architect__\/connections(?:\.ts)?\1/g;
+
+/**
+ * Points every import of the Slack helper at the right relative path (models often write
+ * "./__architect__/connections" from /lib/), and adds the helper when the app uses it.
+ */
+export function withRuntime(files: FileMap): FileMap {
+  const out: FileMap = {};
+  let uses = false;
+  for (const [path, content] of Object.entries(files)) {
+    const depth = path.split("/").length - 2;
+    const target = `${depth ? "../".repeat(depth) : "./"}__architect__/connections`;
+    out[path] = content.replace(CONNECTIONS_IMPORT, (_, quote: string) => {
+      uses = true;
+      return `${quote}${target}${quote}`;
+    });
+  }
+  return uses ? { ...out, ...RUNTIME_FILES } : out;
+}
+
+export type SlackResult = { ok: boolean; simulated: boolean; error?: string };
+
 export type SelectedElement = { tag: string; text: string; classes: string; path: string };
 
+// An imported project's own build setup would fight the sandbox's bundler; its runtime
+// dependencies are passed separately (previewDependencies).
+const PREVIEW_EXCLUDE = /^\/(package\.json|index\.html|vite\.config\.[cm]?[jt]s|tsconfig(\.[\w-]+)?\.json)$/;
+
+// Packages that only matter at build time, or that the sandbox already provides.
+const BUILD_ONLY = /^(react|react-dom|vite|@vitejs\/.*|next|typescript|@types\/.*|eslint.*|tailwindcss|@tailwindcss\/.*|postcss.*|autoprefixer|react-scripts|webpack.*|@babel\/.*|prettier|jest|vitest)$/;
+
+/** The sandbox's packages plus an imported project's own runtime dependencies. */
+export function previewDependencies(files: FileMap): Record<string, string> {
+  let deps: Record<string, unknown> = {};
+  try {
+    deps = (JSON.parse(files["/package.json"] ?? "{}") as { dependencies?: Record<string, unknown> }).dependencies ?? {};
+  } catch {
+    // A broken package.json just means no extra packages.
+  }
+  const extra = Object.entries(deps).filter(([name, version]) => typeof version === "string" && !BUILD_ONLY.test(name));
+  return { ...Object.fromEntries(extra), ...SANDBOX_DEPENDENCIES } as Record<string, string>;
+}
+
 export function sandboxFiles(files: FileMap): FileMap {
+  const app = Object.fromEntries(Object.entries(withRuntime(files)).filter(([path]) => !PREVIEW_EXCLUDE.test(path)));
   return {
-    ...files,
+    ...app,
+    ...RUNTIME_FILES,
     "/index.tsx": ENTRY,
     "/__architect__/inspector.ts": INSPECTOR,
   };
