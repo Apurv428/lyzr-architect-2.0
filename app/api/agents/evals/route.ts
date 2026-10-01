@@ -18,6 +18,18 @@ const Body = z.object({
   graph: z.object({ nodes: z.array(z.any()).max(40), edges: z.array(z.any()).max(80) }),
   /** Run only these cases (e.g. re-run one); all cases when omitted. */
   caseIds: z.array(z.string().uuid()).max(25).optional(),
+  /** One-off scenarios (the Simulate tab) instead of saved tests; not recorded in the pass-rate history. */
+  scenarios: z
+    .array(
+      z.object({
+        id: z.string().max(40),
+        input: z.string().trim().min(1).max(2000),
+        kind: z.enum(["contains", "not_contains", "judge"]),
+        expectation: z.string().max(500),
+      }),
+    )
+    .max(8)
+    .optional(),
 });
 
 export async function POST(request: Request) {
@@ -39,7 +51,9 @@ export async function POST(request: Request) {
     userAI(supabase, user.id),
   ]);
   if (!agent) return Response.json({ error: "Agent not found" }, { status: 404 });
-  const cases = ((rows ?? []) as EvalCase[]).filter((c) => !body.caseIds || body.caseIds.includes(c.id));
+  const cases: EvalCase[] = body.scenarios
+    ? body.scenarios.map((s) => ({ ...s, created_at: "" }))
+    : ((rows ?? []) as EvalCase[]).filter((c) => !body.caseIds || body.caseIds.includes(c.id));
   if (!cases.length) return Response.json({ error: "Add a test first." }, { status: 400 });
 
   // Evals run the canvas as it is now, including unsaved edits, so a change can be checked immediately.
@@ -94,8 +108,8 @@ export async function POST(request: Request) {
         }
 
         const { passed, graded, passRate } = summarize(results);
-        // Only full runs go into the pass-rate history; re-running one test is a spot check.
-        const { data: run } = body.caseIds
+        // Only full runs of saved tests go into the pass-rate history; re-runs and simulations are spot checks.
+        const { data: run } = body.caseIds || body.scenarios
           ? { data: null }
           : await supabase.from("eval_runs").insert({ agent_id: body.agentId, results, passed, graded, pass_rate: passRate }).select("id").single();
         send({ t: "done", runId: run?.id ?? null, passed, graded, charged });

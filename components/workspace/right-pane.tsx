@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, Code2, Database, Eye, Rocket } from "lucide-react";
+import { Bot, Code2, Database, Eye, FileText, Rocket } from "lucide-react";
 import type { ChatMessage, Plan } from "@/lib/ai/schema";
 import { useWorkspace, type Tab } from "@/lib/workspace/store";
 import { cn } from "@/lib/utils";
@@ -8,12 +8,14 @@ import { CodeTab } from "./code-tab";
 import { PreviewTab } from "./preview-tab";
 import { AgentTab } from "@/components/agent/agent-tab";
 import { DeployTab } from "@/components/deploy/deploy-tab";
+import { ArtifactsTab } from "./artifacts-tab";
 
 const TABS: { id: Tab; label: string; icon: typeof Eye; proOnly?: boolean }[] = [
   { id: "preview", label: "Preview", icon: Eye },
   { id: "code", label: "Code", icon: Code2 },
   { id: "agent", label: "Agent", icon: Bot },
   { id: "data", label: "Data", icon: Database },
+  { id: "artifacts", label: "Artifacts", icon: FileText },
   { id: "deploy", label: "Deploy", icon: Rocket },
 ];
 
@@ -89,6 +91,7 @@ export function RightPane() {
         {tab === "code" && <CodeTab />}
         {tab === "agent" && <AgentTab />}
         {tab === "data" && <DataTab />}
+        {tab === "artifacts" && <ArtifactsTab />}
         {tab === "deploy" && <DeployTab />}
       </div>
     </div>

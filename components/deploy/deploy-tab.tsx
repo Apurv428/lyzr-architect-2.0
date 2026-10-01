@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { Activity, ArrowUpCircle, Check, Copy, ExternalLink, Globe, KeyRound, Loader2, Plus, Rocket, Terminal, Trash2 } from "lucide-react";
+import { Activity, ArrowUpCircle, Check, Copy, ExternalLink, Globe, KeyRound, Link2, Loader2, Plus, Rocket, Terminal, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { createApiKey, listApiKeys, revokeApiKey, type ApiKeyRow } from "@/lib/actions/api-keys";
-import { listDeployments, promoteDeployment } from "@/lib/actions/deployments";
+import { listDeployments, promoteDeployment, renameDeploymentSlug } from "@/lib/actions/deployments";
 import { deploymentUrl, type Deployment } from "@/lib/deploy";
 import { timeAgo } from "@/lib/time";
 import { useWorkspace } from "@/lib/workspace/store";
@@ -155,6 +155,75 @@ function AgentApi({ agentId }: { agentId: string }) {
   );
 }
 
+function UrlRenameSection({ projectId, deployment, origin, onRenamed }: { projectId: string; deployment: Deployment; origin: string; onRenamed: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [slug, setSlug] = useState(deployment.slug ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const current = deploymentUrl(origin, deployment);
+
+  if (!editing) {
+    return (
+      <div className="flex items-center gap-3 rounded-xl border bg-card/60 px-4 py-3">
+        <Link2 className="size-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-medium text-muted-foreground">Live URL</p>
+          <a href={current} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 truncate font-mono text-xs text-primary hover:underline">
+            {current} <ExternalLink className="size-3 shrink-0" />
+          </a>
+        </div>
+        <Button size="xs" variant="outline" onClick={() => setEditing(true)}>
+          Rename URL
+        </Button>
+      </div>
+    );
+  }
+
+  async function save() {
+    const clean = slug.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-{2,}/g, "-").replace(/^-+|-+$/g, "");
+    if (!clean) return;
+    setSaving(true);
+    setError(null);
+    const res = await renameDeploymentSlug(projectId, clean);
+    setSaving(false);
+    if ("error" in res) {
+      setError(res.error ?? "Couldn't rename the link.");
+      return;
+    }
+    toast.success("Link renamed. The old link no longer works, so share the new one.");
+    setEditing(false);
+    onRenamed();
+  }
+
+  return (
+    <div className="space-y-2 rounded-xl border bg-card/60 px-4 py-3">
+      <p className="text-xs font-medium">Rename live URL</p>
+      <div className="flex items-center gap-2">
+        <span className="shrink-0 text-xs text-muted-foreground">{origin}/s/</span>
+        <input
+          autoFocus
+          value={slug}
+          onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"))}
+          onKeyDown={(e) => e.key === "Enter" && save()}
+          placeholder="my-custom-slug"
+          aria-invalid={Boolean(error)}
+          className="h-7 min-w-0 flex-1 rounded-md border bg-background px-2 font-mono text-xs outline-none focus:border-primary"
+        />
+        <Button size="xs" onClick={save} disabled={saving || !slug.trim()}>
+          {saving ? <Loader2 className="animate-spin" /> : <Check />} Save
+        </Button>
+        <Button size="xs" variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
+      </div>
+      {error ? (
+        <p className="text-[11px] text-destructive">{error}</p>
+      ) : (
+        <p className="text-[11px] text-muted-foreground">3–48 lowercase letters, numbers and hyphens. The old link stops working once you rename it.</p>
+      )}
+    </div>
+  );
+}
+
 function Bars({ values, format, color }: { values: number[]; format: (n: number) => string; color: string }) {
   const max = Math.max(1, ...values);
   return (
@@ -224,6 +293,8 @@ export function DeployTab() {
             <Rocket /> {current ? "Redeploy" : "Deploy"}
           </Button>
         </div>
+
+        {current && <UrlRenameSection key={current.slug} projectId={projectId} deployment={current} origin={origin} onRenamed={() => setRefresh((r) => r + 1)} />}
 
         <Section icon={Terminal} title="Deployments" badge={`${data.deployments.length}`}>
           {data.deployments.length === 0 ? (

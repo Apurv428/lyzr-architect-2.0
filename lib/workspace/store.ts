@@ -7,7 +7,7 @@ import type { AgentRecord } from "@/lib/agent/types";
 import type { SelectedElement } from "./sandbox";
 import type { Mode } from "@/lib/types";
 
-export type Tab = "preview" | "code" | "agent" | "data" | "deploy";
+export type Tab = "preview" | "code" | "agent" | "data" | "deploy" | "artifacts";
 export type Device = "desktop" | "tablet" | "mobile";
 export type PreviewRuntime = "sandpack" | "webcontainer" | "e2b";
 

@@ -24,6 +24,33 @@ export async function listDeployments(projectId: string) {
   };
 }
 
+const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,46}[a-z0-9])$/;
+
+/**
+ * Renames the project's public link (/s/<slug>). Every deployment of the project moves with it;
+ * the old link stops working. Slugs are unique across all projects.
+ */
+export async function renameDeploymentSlug(projectId: string, input: string) {
+  const slug = input.trim().toLowerCase();
+  if (!SLUG_RE.test(slug) || slug.includes("--")) {
+    return { error: "Use 3–48 lowercase letters, numbers and single hyphens, starting and ending with a letter or number." };
+  }
+  const { supabase } = await getUser();
+  const { data: project } = await supabase.from("projects").select("slug, deploy_url").eq("id", projectId).single();
+  if (!project) return { error: "Project not found." };
+  if (project.slug === slug) return { slug };
+
+  const deployUrl = (project.deploy_url as string | null)?.replace(/\/s\/[^/?#]+/, `/s/${slug}`) ?? null;
+  const { error } = await supabase.from("projects").update({ slug, deploy_url: deployUrl }).eq("id", projectId);
+  if (error) return { error: error.code === "23505" ? "That link is taken. Try another." : error.message };
+  const { error: moveError } = await supabase.from("deployments").update({ slug }).eq("project_id", projectId);
+  if (moveError) {
+    await supabase.from("projects").update({ slug: project.slug, deploy_url: project.deploy_url }).eq("id", projectId);
+    return { error: moveError.message };
+  }
+  return { slug };
+}
+
 // Rollback = point production at an earlier ready deployment. Nothing is deleted.
 export async function promoteDeployment(projectId: string, deploymentId: string) {
   const { supabase } = await getUser();

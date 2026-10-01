@@ -2,16 +2,19 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Code2, KeyRound, Loader2, RotateCcw, Trash2, Users, Wand2 } from "lucide-react";
+import { Check, Code2, KeyRound, Loader2, Palette, RotateCcw, Trash2, Upload, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { ThemeToggle } from "@/components/app/theme-toggle";
 import { clearTourDone } from "@/components/app/tour";
 import { ConnectGitHub } from "@/components/github/connect-github";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
+import { Textarea } from "@/components/ui/textarea";
+import { fetchDesignTokens, saveDesignTokens } from "@/lib/actions/design";
 import { disconnectGithub } from "@/lib/actions/github";
 import { resetTour } from "@/lib/actions/profile";
 import { deleteAllProjects, saveModelKey, updatePreferences, updateProfile } from "@/lib/actions/settings";
+import { parseDesignTokens, type DesignTokens } from "@/lib/design-tokens";
 import type { Mode } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -230,75 +233,155 @@ export function GitHubSection({ login }: { login: string | null }) {
   );
 }
 
-const MOCK_TEAM = [
-  { name: "You", email: "you@yourcompany.com", role: "Admin", avatar: "YO" },
-  { name: "Alex Rivera", email: "alex@yourcompany.com", role: "Builder", avatar: "AR" },
-  { name: "Sam Patel", email: "sam@yourcompany.com", role: "Viewer", avatar: "SP" },
-];
+export function DesignSystemSection({ initial, setupNeeded }: { initial: DesignTokens | null; setupNeeded: boolean }) {
+  const [source, setSource] = useState<"file" | "paste" | "url">("file");
+  const [text, setText] = useState("");
+  const [url, setUrl] = useState("");
+  const [saved, setSaved] = useState<DesignTokens | null>(initial);
+  const [draft, setDraft] = useState<DesignTokens | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-const ROLE_COLORS: Record<string, string> = {
-  Admin: "bg-primary/15 text-primary",
-  Builder: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-  Viewer: "bg-muted text-muted-foreground",
-};
+  function read(content: string, from: string) {
+    try {
+      setDraft(parseDesignTokens(content, from));
+      setError(null);
+    } catch (err) {
+      setDraft(null);
+      setError(err instanceof Error ? err.message : "Couldn't read those tokens.");
+    }
+  }
 
-const MOCK_AUDIT = [
-  { action: "Deployed to production", who: "You", at: "2 min ago" },
-  { action: "Added OPENAI_API_KEY env var", who: "You", at: "1 hr ago" },
-  { action: "Invited alex@yourcompany.com", who: "You", at: "Yesterday" },
-  { action: "Ran agent eval suite (4/4 passed)", who: "Alex Rivera", at: "Yesterday" },
-  { action: "Pushed GitHub PR #12", who: "Alex Rivera", at: "2 days ago" },
-];
+  async function fromUrl() {
+    setBusy(true);
+    const res = await fetchDesignTokens(url);
+    setBusy(false);
+    if ("error" in res) {
+      setDraft(null);
+      setError(res.error);
+    } else {
+      setDraft(res.tokens);
+      setError(null);
+    }
+  }
 
-export function TeammatesSection() {
+  async function persist(tokens: DesignTokens | null) {
+    setBusy(true);
+    const res = await saveDesignTokens(tokens);
+    setBusy(false);
+    if ("error" in res) return toast.error(res.error);
+    setSaved(tokens);
+    setDraft(null);
+    setText("");
+    setUrl("");
+    toast.success(tokens ? "Design system saved. New builds use your brand." : "Design system removed.");
+  }
+
+  const shown = draft ?? saved;
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground">Showing example data — team features arrive in v2.</p>
-        <span className="rounded-full border border-dashed px-2.5 py-0.5 text-[10px] font-medium text-muted-foreground">Coming in v2</span>
-      </div>
+      {setupNeeded && (
+        <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+          Saving needs the database update in <code>supabase/migrations/0016_design_system.sql</code>. You can still preview tokens below.
+        </p>
+      )}
 
-      <div className="overflow-hidden rounded-lg border">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b bg-muted/40">
-              <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Member</th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Email</th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Role</th>
-            </tr>
-          </thead>
-          <tbody>
-            {MOCK_TEAM.map((m) => (
-              <tr key={m.email} className="border-b last:border-0">
-                <td className="px-3 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <span className="grid size-7 shrink-0 place-items-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary">{m.avatar}</span>
-                    <span className="font-medium">{m.name}</span>
-                  </div>
-                </td>
-                <td className="px-3 py-2.5 text-xs text-muted-foreground">{m.email}</td>
-                <td className="px-3 py-2.5">
-                  <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", ROLE_COLORS[m.role])}>{m.role}</span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div>
-        <p className="mb-2 text-xs font-medium">Audit log</p>
-        <div className="space-y-1">
-          {MOCK_AUDIT.map((e, i) => (
-            <div key={i} className="flex items-center gap-3 rounded-lg border bg-background/50 px-3 py-2 text-xs">
-              <Users className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="flex-1 text-foreground">{e.action}</span>
-              <span className="text-muted-foreground">{e.who}</span>
-              <span className="text-muted-foreground">{e.at}</span>
+      {shown && (
+        <div className="space-y-2.5 rounded-lg border bg-muted/20 p-3">
+          <div className="flex items-center gap-2">
+            {draft ? <Palette className="size-4 text-primary" /> : <Check className="size-4 text-emerald-600 dark:text-emerald-400" />}
+            <p className="min-w-0 flex-1 truncate text-sm font-medium">{draft ? "Preview" : "In use"} · {shown.source}</p>
+            {!draft && (
+              <button onClick={() => persist(null)} disabled={busy} className="text-xs text-muted-foreground underline hover:text-foreground">
+                Remove
+              </button>
+            )}
+          </div>
+          {shown.colors.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {shown.colors.map((c) => (
+                <span key={c.name} className="inline-flex items-center gap-1.5 rounded-full border bg-background py-0.5 pr-2 pl-0.5 text-[11px]" title={c.value}>
+                  <span className="size-4 rounded-full border" style={{ background: c.value }} />
+                  {c.name}
+                </span>
+              ))}
             </div>
-          ))}
+          )}
+          <p className="text-xs text-muted-foreground">
+            {[shown.fonts.length ? `Fonts: ${shown.fonts.join(", ")}` : "", shown.radius ? `Radius: ${shown.radius}` : "", `${shown.colors.length} colour${shown.colors.length === 1 ? "" : "s"}`]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
+          {draft && (
+            <div className="flex gap-2">
+              <Button size="sm" onClick={() => persist(draft)} disabled={busy || setupNeeded}>
+                {busy ? <Loader2 className="animate-spin" /> : <Check />} Use this design system
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setDraft(null)} disabled={busy}>
+                Discard
+              </Button>
+            </div>
+          )}
         </div>
+      )}
+
+      <div className="flex w-fit gap-1 rounded-lg border p-1">
+        {(["file", "paste", "url"] as const).map((s) => (
+          <button
+            key={s}
+            onClick={() => setSource(s)}
+            className={cn("rounded-md px-3 py-1 text-xs font-medium transition", source === s ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground")}
+          >
+            {s === "file" ? "Upload file" : s === "paste" ? "Paste" : "From URL"}
+          </button>
+        ))}
       </div>
+
+      {source === "file" && (
+        <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed bg-muted/30 px-3 py-2.5 text-sm text-muted-foreground hover:border-primary/50 hover:text-foreground">
+          <Upload className="size-4 shrink-0" />
+          <span>Choose a CSS variables file or design-token JSON (a Figma variables export works too)</span>
+          <input
+            type="file"
+            className="hidden"
+            accept=".css,.json,text/css,application/json"
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (!file) return;
+              if (file.size > 200_000) return setError("That file is over 200 KB.");
+              read(await file.text(), file.name);
+            }}
+          />
+        </label>
+      )}
+      {source === "paste" && (
+        <div className="space-y-2">
+          <Textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder={":root {\n  --primary: #4f46e5;\n  --font-sans: \"Inter\", sans-serif;\n  --radius: 0.75rem;\n}"}
+            className="min-h-28 font-mono text-xs"
+          />
+          <Button size="sm" variant="outline" onClick={() => read(text, "Pasted tokens")} disabled={!text.trim()}>
+            <Palette /> Read tokens
+          </Button>
+        </div>
+      )}
+      {source === "url" && (
+        <div className="flex gap-2">
+          <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/tokens.json" className={cn(input, "flex-1")} type="url" />
+          <Button size="sm" onClick={fromUrl} disabled={busy || !url.trim()}>
+            {busy ? <Loader2 className="animate-spin" /> : <Palette />} Fetch
+          </Button>
+        </div>
+      )}
+      {error && <p className="text-xs text-destructive">{error}</p>}
+      <p className="text-xs text-muted-foreground">
+        Reads CSS custom properties, W3C design-token JSON and Figma variable exports. Saved tokens go to the AI with every build, so new screens use your
+        colours, fonts and corner radius.
+      </p>
     </div>
   );
 }
