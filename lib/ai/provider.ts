@@ -36,6 +36,32 @@ export function openaiModelFor(ownKey: boolean, requested?: string) {
   return ownKey && process.env.OPENAI_BASE_URL ? "gpt-5.5" : OPENAI_MODEL;
 }
 
+/** An OpenAI-compatible endpoint for a model family picked on the agent canvas. */
+export type CompatibleHost = { apiKey: string; baseURL: string; model: string; label: string };
+
+const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/";
+
+/**
+ * Where a "gemini" or "llama" agent runs. Gemini uses GEMINI_API_KEY, or the platform key when
+ * OPENAI_BASE_URL already points at Gemini. Llama uses any OpenAI-compatible host (Groq, Together,
+ * OpenRouter, a local Ollama) named by LLAMA_BASE_URL. Null when the server isn't set up for it.
+ */
+export function compatibleHost(model: string): CompatibleHost | null {
+  if (model === "gemini") {
+    const model = process.env.GEMINI_MODEL ?? "gemini-flash-lite-latest";
+    if (process.env.GEMINI_API_KEY) return { apiKey: process.env.GEMINI_API_KEY, baseURL: GEMINI_URL, model, label: "Gemini" };
+    if (process.env.OPENAI_API_KEY && process.env.OPENAI_BASE_URL?.includes("generativelanguage.googleapis.com")) {
+      return { apiKey: process.env.OPENAI_API_KEY, baseURL: process.env.OPENAI_BASE_URL, model: process.env.GEMINI_MODEL ?? OPENAI_MODEL, label: "Gemini" };
+    }
+    return null;
+  }
+  if (model === "llama" && process.env.LLAMA_BASE_URL) {
+    // Local hosts such as Ollama don't need a key, but the SDK requires a non-empty one.
+    return { apiKey: process.env.LLAMA_API_KEY || "none", baseURL: process.env.LLAMA_BASE_URL, model: process.env.LLAMA_MODEL ?? "llama-3.3-70b-versatile", label: "Llama" };
+  }
+  return null;
+}
+
 /** The account behind the key has no credits left. OpenAI sends this as a 429, but retrying never helps. */
 export function isOutOfCredits(err: unknown) {
   return err instanceof OpenAI.APIError && (err.type === "insufficient_quota" || err.code === "insufficient_quota");

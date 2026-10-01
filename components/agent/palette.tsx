@@ -5,7 +5,7 @@ import { useWorkspace } from "@/lib/workspace/store";
 import { cn } from "@/lib/utils";
 import { KIND_ICON } from "./agent-node";
 
-const ORDER: NodeKind[] = ["trigger", "llm", "tool", "knowledge", "memory", "guardrail", "output"];
+const ORDER: NodeKind[] = ["trigger", "llm", "tool", "knowledge", "memory", "guardrail", "output", "manager", "subagent", "mcp"];
 export const DRAG_TYPE = "application/x-architect-node";
 
 export function Palette({ onAdd }: { onAdd: (kind: NodeKind) => void }) {

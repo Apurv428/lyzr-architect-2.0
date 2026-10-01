@@ -1,4 +1,5 @@
 import { systemPrompt, type AgentSpec } from "./compile";
+import { TOOL_CATALOG } from "./types";
 
 const py = (s: string) => JSON.stringify(s);
 // Multi-line prompts read better as triple-quoted Python strings.
@@ -14,17 +15,23 @@ const TOOL_STUBS: Record<string, { fn: string; doc: string; args: string }> = {
   http_request: { fn: "http_request", doc: "Call an external REST API.", args: "method: str, url: str, body: str = ''" },
 };
 
+/** The Python stub for a tool: a hand-written one, or a generic one for other catalog tools. Web search is built in. */
+function stubFor(id: string) {
+  if (TOOL_STUBS[id]) return TOOL_STUBS[id];
+  const meta = TOOL_CATALOG.find((t) => t.id === id);
+  return id === "web_search" || !meta ? undefined : { fn: id, doc: `${meta.description}.`, args: "action: str, details: str" };
+}
+
 function customTools(spec: AgentSpec, decorator: string) {
   return spec.tools
-    .filter((t) => TOOL_STUBS[t])
-    .map((t) => {
-      const s = TOOL_STUBS[t];
-      return `${decorator ? decorator + "\n" : ""}def ${s.fn}(${s.args}) -> str:\n    """${s.doc}"""\n    raise NotImplementedError("Connect your ${t.replace("_", " ")} integration")\n`;
+    .flatMap((t) => {
+      const s = stubFor(t);
+      return s ? [`${decorator ? decorator + "\n" : ""}def ${s.fn}(${s.args}) -> str:\n    """${s.doc}"""\n    raise NotImplementedError("Connect your ${t.replaceAll("_", " ")} integration")\n`] : [];
     })
     .join("\n");
 }
 
-const toolNames = (spec: AgentSpec) => spec.tools.filter((t) => TOOL_STUBS[t]).map((t) => TOOL_STUBS[t].fn);
+const toolNames = (spec: AgentSpec) => spec.tools.flatMap((t) => stubFor(t)?.fn ?? []);
 
 export const FRAMEWORK_LANG: Record<string, string> = {
   "lyzr-adk": "json",
@@ -35,15 +42,47 @@ export const FRAMEWORK_LANG: Record<string, string> = {
   "google-adk": "python",
 };
 
+// Concrete model ids for the canvas choices that name a family rather than a version.
+const FAMILY_MODEL: Record<string, string> = { gemini: "gemini-2.5-flash", llama: "llama-3.3-70b-versatile" };
+
+/** The model family and the id frameworks expect for it. */
+function modelInfo(model: string) {
+  const family = model.startsWith("gpt") ? "openai" : model === "gemini" ? "gemini" : model === "llama" ? "llama" : "anthropic";
+  return { family, id: FAMILY_MODEL[model] ?? model };
+}
+
+/** LangChain chat model: package, import line and constructor for the agent's model. */
+function langchainModel(model: string) {
+  const { family, id } = modelInfo(model);
+  switch (family) {
+    case "openai":
+      return { pkg: "langchain-openai", imports: "from langchain_openai import ChatOpenAI", ctor: `ChatOpenAI(model=${py(id)})` };
+    case "gemini":
+      return { pkg: "langchain-google-genai", imports: "from langchain_google_genai import ChatGoogleGenerativeAI", ctor: `ChatGoogleGenerativeAI(model=${py(id)})` };
+    case "llama":
+      // Any OpenAI-compatible Llama host (Groq, Together, OpenRouter, Ollama).
+      return { pkg: "langchain-openai", imports: "import os\nfrom langchain_openai import ChatOpenAI", ctor: `ChatOpenAI(model=${py(id)}, base_url=os.environ["LLAMA_BASE_URL"], api_key=os.environ["LLAMA_API_KEY"])` };
+    default:
+      return { pkg: "langchain-anthropic", imports: "from langchain_anthropic import ChatAnthropic", ctor: `ChatAnthropic(model=${py(id)})` };
+  }
+}
+
+/** LiteLLM-style model string, as CrewAI expects. */
+function litellmModel(model: string) {
+  const { family, id } = modelInfo(model);
+  return family === "llama" ? `groq/${id}` : `${family}/${id}`;
+}
+
 export function generateCode(spec: AgentSpec, framework: string): string {
   const prompt = systemPrompt(spec);
   const name = ident(spec.name);
   const names = toolNames(spec);
+  const lc = langchainModel(spec.model);
 
   switch (framework) {
     case "langgraph":
-      return `# pip install langgraph ${spec.model.startsWith("gpt") ? "langchain-openai" : "langchain-anthropic"}
-${spec.model.startsWith("gpt") ? "from langchain_openai import ChatOpenAI" : "from langchain_anthropic import ChatAnthropic"}
+      return `# pip install langgraph ${lc.pkg}
+${lc.imports}
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 
@@ -51,7 +90,7 @@ ${customTools(spec, "@tool")}
 SYSTEM_PROMPT = ${pyBlock(prompt)}
 
 ${name} = create_react_agent(
-    model=${spec.model.startsWith("gpt") ? "ChatOpenAI" : "ChatAnthropic"}(model=${py(spec.model)}),
+    model=${lc.ctor},
     tools=[${names.join(", ")}],
     prompt=SYSTEM_PROMPT,
 )
@@ -70,7 +109,7 @@ ${name} = Agent(
     role=${py(spec.name)},
     goal=${py(spec.instructions.split("\n")[0])},
     backstory=${pyBlock(prompt)},
-    llm=${py((spec.model.startsWith("gpt") ? "openai/" : "anthropic/") + spec.model)},
+    llm=${py(litellmModel(spec.model))},
     tools=[${names.join(", ")}],
 )
 
@@ -106,7 +145,7 @@ import asyncio
 from claude_agent_sdk import ClaudeAgentOptions, query
 
 options = ClaudeAgentOptions(
-    model=${py(spec.model)},
+    model=${py(modelInfo(spec.model).family === "anthropic" ? spec.model : "claude-sonnet-5")},  # the Claude Agent SDK runs Claude models
     system_prompt=${pyBlock(prompt)},
     allowed_tools=[${spec.tools.includes("web_search") ? '"WebSearch"' : ""}],
 )

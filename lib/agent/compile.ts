@@ -23,6 +23,8 @@ export type AgentSpec = {
   subAgents: SubAgentRef[];
   /** Max number of sub-agent calls when a Manager node is present. */
   managerMaxCalls: number;
+  /** Connected MCP server blocks; the token is stored encrypted (see lib/agent/mcp.ts). */
+  mcpServers: { nodeId: string; url: string; token: string | null; description: string }[];
 };
 
 const of = (graph: AgentGraph, kind: AgentNodeData["kind"]) => graph.nodes.filter((n) => n.data.kind === kind).map((n) => n.data);
@@ -77,6 +79,10 @@ export function compileAgent(graph: AgentGraph, name: string): AgentSpec {
       .map((n) => ({ id: str(n.config.agentId), label: str(n.config.label) }))
       .filter((s) => s.id),
     managerMaxCalls: managerNode ? Math.min(8, Math.max(1, parseInt(str(managerNode.config.maxCalls, "4"), 10) || 4)) : 0,
+    mcpServers: liveGraph.nodes
+      .filter((n) => n.data.kind === "mcp" && str(n.data.config.serverUrl).trim())
+      .slice(0, 3)
+      .map((n) => ({ nodeId: n.id, url: str(n.data.config.serverUrl).trim(), token: str(n.data.config.authToken) || null, description: str(n.data.config.description) })),
   };
 }
 

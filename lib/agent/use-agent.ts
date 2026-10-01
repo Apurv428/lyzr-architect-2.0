@@ -11,7 +11,7 @@ type AgentUi = {
   panel: "inspector" | "test" | "evals" | null;
   /** Bumped when a test case is saved elsewhere (e.g. from the test console) so the Evals panel reloads. */
   evalsVersion: number;
-  view: "canvas" | "code";
+  view: "canvas" | "code" | "git";
   saveState: "saved" | "saving" | "unsaved";
   set: (s: Partial<Omit<AgentUi, "set">>) => void;
 };

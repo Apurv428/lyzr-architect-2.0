@@ -16,7 +16,7 @@ import {
   type NodeChange,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Bot, Check, Code2, FlaskConical, ListChecks, Loader2, Workflow } from "lucide-react";
+import { Bot, Check, Code2, FlaskConical, GitBranch, ListChecks, Loader2, Workflow } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { createAgent } from "@/lib/actions/agents";
@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils";
 import { AgentNode } from "./agent-node";
 import { CodeView } from "./code-view";
 import { EvalsPanel } from "./evals-panel";
+import { GitAgent } from "./git-agent";
 import { Inspector } from "./inspector";
 import { DRAG_TYPE, Palette } from "./palette";
 import { TestConsole } from "./test-console";
@@ -95,9 +96,9 @@ function Canvas() {
     // Blocks that only matter when attached to the brain get wired up automatically.
     const edges = [...current.graph.edges];
     if (llm && (kind === "knowledge" || kind === "memory")) edges.push({ id: `e-${node.id}-${llm.id}`, source: node.id, target: llm.id });
-    if (llm && kind === "tool") edges.push({ id: `e-${llm.id}-${node.id}`, source: llm.id, target: node.id });
+    if (llm && (kind === "tool" || kind === "mcp")) edges.push({ id: `e-${llm.id}-${node.id}`, source: llm.id, target: node.id });
 
-    updateAgent({ graph: { nodes: [...current.graph.nodes, node], edges } });
+    updateAgent({ graph: { ...current.graph, nodes: [...current.graph.nodes, node], edges } });
     useAgentUi.getState().set({ selectedId: node.id, panel: "inspector" });
   }
 
@@ -202,6 +203,7 @@ export function AgentTab() {
   }
 
   const showCode = mode === "pro" && view === "code";
+  const showGit = mode === "pro" && view === "git";
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -217,25 +219,27 @@ export function AgentTab() {
         <div className="ml-auto flex items-center gap-1.5">
           {mode === "pro" && (
             <>
-              <select
-                value={agent.framework}
-                onChange={(e) => updateAgent({ framework: e.target.value })}
-                aria-label="Framework"
-                className="h-7 rounded-md border bg-background px-2 text-xs outline-none focus:border-primary"
-              >
-                {FRAMEWORKS.map((f) => (
-                  <option key={f.id} value={f.id}>{f.name}</option>
-                ))}
-              </select>
+              {view !== "git" && (
+                <select
+                  value={agent.framework}
+                  onChange={(e) => updateAgent({ framework: e.target.value })}
+                  aria-label="Framework"
+                  className="h-7 rounded-md border bg-background px-2 text-xs outline-none focus:border-primary"
+                >
+                  {FRAMEWORKS.map((f) => (
+                    <option key={f.id} value={f.id}>{f.name}</option>
+                  ))}
+                </select>
+              )}
               <div className="flex rounded-md bg-muted p-0.5">
-                {(["canvas", "code"] as const).map((v) => (
+                {(["canvas", "code", "git"] as const).map((v) => (
                   <button
                     key={v}
                     onClick={() => useAgentUi.getState().set({ view: v })}
                     className={cn("inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs", view === v ? "bg-background text-foreground" : "text-muted-foreground")}
                   >
-                    {v === "canvas" ? <Workflow className="size-3.5" /> : <Code2 className="size-3.5" />}
-                    {v === "canvas" ? "Canvas" : "Code"}
+                    {v === "canvas" ? <Workflow className="size-3.5" /> : v === "code" ? <Code2 className="size-3.5" /> : <GitBranch className="size-3.5" />}
+                    {v === "canvas" ? "Canvas" : v === "code" ? "Code" : "GitAgent"}
                   </button>
                 ))}
               </div>
@@ -259,7 +263,9 @@ export function AgentTab() {
       </div>
       <div className="flex min-h-0 flex-1">
         <div className="min-w-0 flex-1">
-          {showCode ? (
+          {showGit ? (
+            <GitAgent />
+          ) : showCode ? (
             <CodeView />
           ) : (
             <ReactFlowProvider>
@@ -267,9 +273,9 @@ export function AgentTab() {
             </ReactFlowProvider>
           )}
         </div>
-        {panel === "inspector" && !showCode && <Inspector />}
-        {panel === "test" && <TestConsole />}
-        {panel === "evals" && <EvalsPanel />}
+        {!showGit && panel === "inspector" && !showCode && <Inspector />}
+        {!showGit && panel === "test" && <TestConsole />}
+        {!showGit && panel === "evals" && <EvalsPanel />}
       </div>
     </div>
   );

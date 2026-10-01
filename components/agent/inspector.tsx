@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, ExternalLink, Loader2, Plus, Trash2, Unlink, X } from "lucide-react";
+import Link from "next/link";
+import { CheckCircle2, ExternalLink, Loader2, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { ScheduleEditor } from "./schedule-editor";
 import { Textarea } from "@/components/ui/textarea";
-import { getSlackWebhookConfigured, listUserAgents, removeSlackWebhook, saveSlackWebhook } from "@/lib/actions/agents";
+import { getSlackWebhookConfigured, listUserAgents, removeSlackWebhook, saveSlackWebhook, testMcpServer } from "@/lib/actions/agents";
 import { updateAgent, updateNode, useAgentUi } from "@/lib/agent/use-agent";
 import { KIND_META, MODELS, OUTPUTS, TOOL_CATALOG, TRIGGERS, type GraphNode } from "@/lib/agent/types";
 import { useWorkspace } from "@/lib/workspace/store";
@@ -178,6 +180,76 @@ function SlackWebhookField({ projectId }: { projectId: string }) {
   );
 }
 
+const SAFE_AI_PRESETS = [
+  { label: "Stay on topic", rule: "Only answer questions directly related to this product or service." },
+  { label: "No promises", rule: "Never promise refunds, discounts or outcomes you can't guarantee." },
+  { label: "No legal advice", rule: "Do not give legal, financial or medical advice; refer users to a professional." },
+  { label: "No harmful content", rule: "Refuse requests for harmful, illegal or offensive content politely." },
+  { label: "Be honest about being AI", rule: "Always acknowledge you are an AI if asked directly." },
+  { label: "Cite uncertainty", rule: "When unsure, say so rather than guessing." },
+] as const;
+
+function SafeAIPresets({ node }: { node: GraphNode }) {
+  const [open, setOpen] = useState(false);
+  const rules = Array.isArray(node.data.config.rules) ? (node.data.config.rules as string[]) : [];
+  const setRules = (next: string[]) => updateNode(node.id, (n) => ({ ...n, data: { ...n.data, config: { ...n.data.config, rules: next } } }));
+
+  const unused = SAFE_AI_PRESETS.filter((p) => !rules.includes(p.rule));
+  if (unused.length === 0) return null;
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between rounded-lg border border-dashed px-2.5 py-2 text-xs text-muted-foreground transition hover:border-primary/50 hover:text-foreground"
+      >
+        <span className="font-medium">Safe AI presets</span>
+        <span className="text-[10px] text-muted-foreground">Quick rules for responsible AI</span>
+      </button>
+      {open && (
+        <div className="mt-1.5 space-y-1">
+          {unused.map((p) => (
+            <button
+              key={p.label}
+              type="button"
+              onClick={() => setRules([...rules, p.rule])}
+              className="flex w-full items-center gap-2 rounded-lg border bg-muted/20 px-2.5 py-1.5 text-left text-xs transition hover:bg-muted/50"
+            >
+              <Plus className="size-3 shrink-0 text-primary" />
+              <span className="font-medium text-foreground">{p.label}</span>
+              <span className="truncate text-muted-foreground">{p.rule}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Connects to the MCP server like a run would and lists its tools. */
+function McpTest({ url, token }: { url: string; token: string | null }) {
+  const [state, setState] = useState<{ busy: boolean; tools?: { name: string; description?: string }[]; error?: string }>({ busy: false });
+  async function test() {
+    setState({ busy: true });
+    const res = await testMcpServer(url, token);
+    setState("error" in res ? { busy: false, error: res.error } : { busy: false, tools: res.tools });
+  }
+  return (
+    <div className="space-y-1.5">
+      <Button size="sm" variant="outline" className="w-full" onClick={test} disabled={state.busy || !url.trim()}>
+        {state.busy ? <Loader2 className="animate-spin" /> : <CheckCircle2 />} Test connection
+      </Button>
+      {state.error && <p className="text-[11px] text-destructive">{state.error}</p>}
+      {state.tools && (
+        <p className="text-[11px] text-muted-foreground">
+          {state.tools.length ? `Connected · ${state.tools.length} tool${state.tools.length === 1 ? "" : "s"}: ${state.tools.map((t) => t.name).join(", ")}` : "Connected, but the server offers no tools."}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function SubAgentPicker({
   node,
   excludeAgentId,
@@ -286,20 +358,29 @@ export function Inspector() {
         {node.data.kind === "tool" && (
           <>
             <Field label={mode === "guided" ? "Action" : "Tool"}>
-              <select
-                value={String(c.tool)}
-                onChange={(e) => {
-                  const t = TOOL_CATALOG.find((x) => x.id === e.target.value)!;
-                  updateNode(node.id, (n) => ({ ...n, data: { ...n.data, label: t.label, config: { ...n.data.config, tool: t.id } } }));
-                }}
-                className={field}
-              >
-                {TOOL_CATALOG.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.label} {t.live ? "(live)" : "(simulated)"}
-                  </option>
-                ))}
-              </select>
+              {(() => {
+                const categories = [...new Set(TOOL_CATALOG.map((t) => t.category))];
+                return (
+                  <select
+                    value={String(c.tool)}
+                    onChange={(e) => {
+                      const t = TOOL_CATALOG.find((x) => x.id === e.target.value)!;
+                      updateNode(node.id, (n) => ({ ...n, data: { ...n.data, label: t.label, config: { ...n.data.config, tool: t.id } } }));
+                    }}
+                    className={field}
+                  >
+                    {categories.map((cat) => (
+                      <optgroup key={cat} label={cat}>
+                        {TOOL_CATALOG.filter((t) => t.category === cat).map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.label} {t.live ? "(live)" : "(simulated)"}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                );
+              })()}
               <span className="block text-[11px] text-muted-foreground">
                 {TOOL_CATALOG.find((t) => t.id === c.tool)?.live
                   ? "Runs for real during tests."
@@ -356,6 +437,7 @@ export function Inspector() {
             <Field label={mode === "guided" ? "Rules" : "Policy rules"}>
               <RulesEditor node={node} />
             </Field>
+            <SafeAIPresets node={node} />
             <label className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5">
               <span>
                 <span className="block text-sm font-medium">Redact personal data</span>
@@ -367,11 +449,22 @@ export function Inspector() {
         )}
 
         {node.data.kind === "trigger" && (
-          <Field label="Starts when">
-            <select value={String(c.source)} onChange={(e) => setConfig("source", e.target.value)} className={field}>
-              {TRIGGERS.map((t) => <option key={t}>{t}</option>)}
-            </select>
-          </Field>
+          <>
+            <Field label="Starts when">
+              <select value={String(c.source)} onChange={(e) => setConfig("source", e.target.value)} className={field}>
+                {TRIGGERS.map((t) => <option key={t}>{t}</option>)}
+              </select>
+            </Field>
+            {c.source === "Schedule" && agentId && <ScheduleEditor agentId={agentId} />}
+            {c.source === "Webhook" && agentId && (
+              <p className="rounded-lg border bg-muted/40 p-2.5 text-xs text-muted-foreground">
+                Any app can run this agent by POSTing to its webhook URL.{" "}
+                <Link href={`/integrations?agent=${agentId}`} className="text-primary hover:underline">
+                  Create one in Integrations →
+                </Link>
+              </p>
+            )}
+          </>
         )}
 
         {node.data.kind === "output" && (
@@ -414,6 +507,53 @@ export function Inspector() {
 
         {node.data.kind === "subagent" && (
           <SubAgentPicker node={node} excludeAgentId={agentId} setConfig={setConfig} />
+        )}
+
+        {node.data.kind === "mcp" && (
+          <>
+            <Field
+              label={mode === "guided" ? "Server address" : "MCP server URL"}
+              hint={mode === "guided" ? "The address of the tool server to connect." : "e.g. https://mcp.example.com or a localhost URL for local servers."}
+            >
+              <input
+                value={String(c.serverUrl)}
+                onChange={(e) => setConfig("serverUrl", e.target.value)}
+                placeholder="https://mcp.example.com"
+                className={field}
+                type="url"
+                autoComplete="off"
+              />
+            </Field>
+            <Field
+              label={mode === "guided" ? "Access token (optional)" : "Auth token (optional)"}
+              hint="Encrypted when the agent saves, sent as a Bearer token, and never included in exported code."
+            >
+              <input
+                value={String(c.authToken ?? "").startsWith("v1:") ? "" : String(c.authToken ?? "")}
+                onChange={(e) => setConfig("authToken", e.target.value)}
+                placeholder={String(c.authToken ?? "").startsWith("v1:") ? "Saved (encrypted). Type to replace" : "Bearer token or API key"}
+                className={field}
+                type="password"
+                autoComplete="off"
+              />
+            </Field>
+            <McpTest url={String(c.serverUrl ?? "")} token={String(c.authToken ?? "") || null} />
+            <Field label="Description" hint="What this server provides — shown in the agent's system prompt.">
+              <Textarea
+                value={String(c.description)}
+                onChange={(e) => setConfig("description", e.target.value)}
+                placeholder="e.g. Internal knowledge base with company docs"
+                className="min-h-20 text-xs"
+              />
+            </Field>
+            <p className="rounded-lg border border-pink-500/30 bg-pink-500/5 px-3 py-2 text-xs text-muted-foreground">
+              MCP (Model Context Protocol) lets the agent call tools from any compatible server over Streamable HTTP. Connect this block to the
+              brain; each run lists the server&apos;s tools and the model can call them. Public https servers only.{" "}
+              <a href="https://modelcontextprotocol.io" target="_blank" rel="noopener noreferrer" className="text-primary underline">
+                Learn more ↗
+              </a>
+            </p>
+          </>
         )}
       </div>
       <div className="border-t p-3">

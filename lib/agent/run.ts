@@ -12,7 +12,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { MODELS, TOOL_CATALOG } from "@/lib/agent/types";
 import type { TraceStep } from "@/lib/agent/trace";
 import type { ResolvedProvider } from "@/lib/ai/keys";
-import { isOutOfCredits, openaiClient, openaiModelFor, supportsReasoningEffort } from "@/lib/ai/provider";
+import { McpSession, mcpToken, mcpToolName } from "@/lib/agent/mcp";
+import { compatibleHost, isOutOfCredits, openaiClient, openaiModelFor, supportsReasoningEffort, type CompatibleHost } from "@/lib/ai/provider";
 
 // One agent runner shared by the test console, the public API and evals.
 
@@ -55,6 +56,8 @@ export class AgentRunError extends Error {}
 
 /** Refuses models that need a key the platform doesn't have. Returns an error message or null. */
 export function unavailableModel(spec: AgentSpec) {
+  if (spec.model === "gemini" && !compatibleHost("gemini")) return "Gemini isn't set up on this server (add GEMINI_API_KEY). Pick a Claude or GPT model.";
+  if (spec.model === "llama" && !compatibleHost("llama")) return "Llama needs an OpenAI-compatible host on the server (LLAMA_BASE_URL). Pick another model.";
   const info = MODELS.find((m) => m.id === spec.model);
   return info?.available ? null : `${info?.label ?? spec.model} needs your own API key — pick a Claude model.`;
 }
@@ -256,6 +259,17 @@ export async function runAgent({ spec: compiled, input, history, llm, loadDocs, 
     }
   }
 
+  // MCP server blocks add their tools for this run (the demo model can't call tools, so skip them there).
+  const extraTools = spec.mcpServers.length && (llm.provider !== "demo" || compatibleHost(spec.model)) ? await connectMcpTools(spec, step) : [];
+  const toolCtx: ToolContext = { slackWebhookUrl, supabase, projectId, extraTools };
+
+  // Gemini and Llama run on their own OpenAI-compatible host, whatever key the caller resolved.
+  const host = compatibleHost(spec.model);
+  if (host) {
+    const result = await runOpenAI(spec, history, input, step, passages, undefined, toolCtx, host);
+    return finish(result, "openai");
+  }
+
   // Run on the provider the Brain block asks for; the caller resolved a fallback if it isn't configured.
   const provider = llm.provider;
   const wantsOpenAI = spec.model.startsWith("gpt");
@@ -266,23 +280,26 @@ export async function runAgent({ spec: compiled, input, history, llm, loadDocs, 
   }
   const result =
     provider === "anthropic"
-      ? await runClaude(spec, history, input, step, passages, llm.apiKey, { slackWebhookUrl, supabase, projectId })
+      ? await runClaude(spec, history, input, step, passages, llm.apiKey, toolCtx)
       : provider === "openai"
-        ? await runOpenAI(spec, history, input, step, passages, llm.apiKey, { slackWebhookUrl, supabase, projectId })
+        ? await runOpenAI(spec, history, input, step, passages, llm.apiKey, toolCtx)
         : await runDemo(spec, input, step, passages);
+  return finish(result, provider);
 
-  let text = result.text;
-  if (spec.redactPII) {
-    const r = redact(text);
-    text = r.text;
-    step({
-      type: "guardrail",
-      title: r.count ? `Redacted ${r.count} piece${r.count > 1 ? "s" : ""} of personal data` : "PII check passed",
-      detail: r.count ? "Emails, phone and card numbers are masked before replying" : "No personal data found in the reply",
-    });
+  function finish(result: { text: string; tokens: number }, ranOn: RunResult["provider"]): RunResult {
+    let text = result.text;
+    if (spec.redactPII) {
+      const r = redact(text);
+      text = r.text;
+      step({
+        type: "guardrail",
+        title: r.count ? `Redacted ${r.count} piece${r.count > 1 ? "s" : ""} of personal data` : "PII check passed",
+        detail: r.count ? "Emails, phone and card numbers are masked before replying" : "No personal data found in the reply",
+      });
+    }
+    step({ type: "output", title: `Delivered as ${spec.output.toLowerCase()}` });
+    return { text, steps, tokens: result.tokens, latencyMs: Date.now() - started, provider: ranOn };
   }
-  step({ type: "output", title: `Delivered as ${spec.output.toLowerCase()}` });
-  return { text, steps, tokens: result.tokens, latencyMs: Date.now() - started, provider };
 }
 
 type StepFn = (s: Omit<TraceStep, "id">) => void;
@@ -312,14 +329,75 @@ const CLIENT_TOOLS: Record<string, Anthropic.Beta.BetaTool["input_schema"]> = {
   },
 };
 
+// Catalog tools without a dedicated schema take a plain-language request.
+const GENERIC_INPUT: Anthropic.Beta.BetaTool["input_schema"] = {
+  type: "object",
+  properties: {
+    action: { type: "string", description: "What to do, e.g. 'search', 'create', 'update'." },
+    details: { type: "string", description: "Everything the tool needs to do it, in plain words." },
+  },
+  required: ["action", "details"],
+};
+
+/** The input schema the model sees for a catalog tool, or undefined for tools the runner doesn't offer. */
+export function toolInputSchema(id: string) {
+  if (CLIENT_TOOLS[id]) return CLIENT_TOOLS[id];
+  return id !== "web_search" && TOOL_CATALOG.some((t) => t.id === id) ? GENERIC_INPUT : undefined;
+}
+
 // Only Slack incoming webhook URLs are permitted — blocks SSRF against internal services.
 const SLACK_WEBHOOK_RE = /^https:\/\/hooks\.slack\.com\/services\/[A-Za-z0-9_]+\/[A-Za-z0-9_]+\/[A-Za-z0-9_]+$/;
+
+/** A tool that isn't in the catalog, such as one offered by a connected MCP server. */
+export type ExtraTool = {
+  name: string;
+  label: string;
+  description: string;
+  schema: Anthropic.Beta.BetaTool["input_schema"];
+  call: (input: Record<string, unknown>) => Promise<{ output: string; live: boolean }>;
+};
 
 export type ToolContext = {
   slackWebhookUrl?: string;
   supabase?: SupabaseClient;
   projectId?: string;
+  extraTools?: ExtraTool[];
 };
+
+/** Connects the agent's MCP server blocks and turns their tools into ones the model can call. */
+async function connectMcpTools(spec: AgentSpec, step: StepFn): Promise<ExtraTool[]> {
+  const tools: ExtraTool[] = [];
+  for (const [i, server] of spec.mcpServers.entries()) {
+    const host = (() => {
+      try {
+        return new URL(server.url).host;
+      } catch {
+        return server.url;
+      }
+    })();
+    const t0 = Date.now();
+    try {
+      const session = await McpSession.connect(server.url, mcpToken(server.token));
+      const listed = await session.listTools();
+      for (const tool of listed) {
+        tools.push({
+          name: mcpToolName(i, tool.name),
+          label: `${tool.name} (MCP)`,
+          description: `${tool.description ?? tool.name}${server.description ? ` From ${server.description}.` : ""}`.slice(0, 1000),
+          schema: (tool.inputSchema?.type === "object" ? tool.inputSchema : { type: "object", properties: {} }) as Anthropic.Beta.BetaTool["input_schema"],
+          call: async (input) => {
+            const r = await session.callTool(tool.name, input);
+            return { output: r.isError ? JSON.stringify({ error: r.text }) : r.text, live: true };
+          },
+        });
+      }
+      step({ type: "tool", title: `Connected to MCP server ${host}`, detail: listed.length ? listed.map((t) => t.name).join(", ") : "No tools offered", ms: Date.now() - t0, live: true });
+    } catch (err) {
+      step({ type: "tool", title: `Couldn't connect to MCP server ${host}`, detail: err instanceof Error ? err.message : "Connection failed", ms: Date.now() - t0 });
+    }
+  }
+  return tools;
+}
 
 /** Executes a tool call. Returns the JSON result and whether it ran for real. */
 export async function executeToolCall(
@@ -328,6 +406,15 @@ export async function executeToolCall(
   ctx: ToolContext = {},
 ): Promise<{ output: string; live: boolean }> {
   const { slackWebhookUrl, supabase, projectId } = ctx;
+
+  const extra = ctx.extraTools?.find((t) => t.name === name);
+  if (extra) {
+    try {
+      return await extra.call(input);
+    } catch (err) {
+      return { output: JSON.stringify({ error: err instanceof Error ? err.message : "The tool failed." }), live: true };
+    }
+  }
 
   // ── Slack ──────────────────────────────────────────────────────────────────
   if (name === "slack_message") {
@@ -385,8 +472,11 @@ export async function executeToolCall(
   return { output: simulateTool(name, input), live: false };
 }
 
+const shortId = () => Math.random().toString(36).slice(2, 10);
+
 // Integrations aren't connected in the sandbox, so tool calls return realistic simulated results.
-function simulateTool(name: string, input: Record<string, unknown>): string {
+export function simulateTool(name: string, input: Record<string, unknown>): string {
+  const details = String(input.details ?? input.query ?? "").slice(0, 120);
   switch (name) {
     case "send_email":
       return JSON.stringify({ status: "queued", to: input.to, message_id: `msg_${Math.random().toString(36).slice(2, 10)}` });
@@ -409,13 +499,44 @@ function simulateTool(name: string, input: Record<string, unknown>): string {
       });
     case "http_request":
       return JSON.stringify({ status: 200, body: { ok: true } });
+    case "arxiv_search":
+      return JSON.stringify({ papers: [{ title: `Recent work on ${details || "the topic"}`, authors: ["A. Rao", "M. Chen"], year: 2026, url: "https://arxiv.org/abs/2609.01234" }] });
+    case "teams_message":
+    case "telegram_message":
+      return JSON.stringify({ ok: true, message_id: shortId(), text: details });
+    case "tweet":
+    case "linkedin_post":
+      return JSON.stringify({ status: "draft_created", id: shortId(), text: details });
+    case "google_calendar":
+      return JSON.stringify({ event_id: shortId(), status: "confirmed", summary: details, start: "2026-10-06T10:00:00+05:30" });
+    case "google_docs":
+    case "notion":
+    case "confluence":
+      return JSON.stringify({ page_id: shortId(), title: details || "Untitled", url: `https://example.com/${name}/${shortId()}` });
+    case "google_drive":
+    case "dropbox":
+      return JSON.stringify({ files: [{ name: "Q3 report.pdf", modified: "2026-09-28" }, { name: "Notes.docx", modified: "2026-09-21" }] });
+    case "asana":
+    case "trello":
+    case "linear":
+    case "jira":
+      return JSON.stringify({ id: name === "jira" ? `PROJ-${100 + Math.floor(Math.random() * 900)}` : shortId(), status: "created", title: details });
+    case "apollo":
+      return JSON.stringify({ people: [{ name: "Meera Iyer", title: "VP Operations", company: "Northwind Logistics", email: "meera@northwind.example" }] });
+    case "freshdesk":
+      return JSON.stringify({ ticket_id: 4000 + Math.floor(Math.random() * 1000), status: "open", subject: details });
+    case "google_sheets":
+    case "excel":
+      return JSON.stringify({ rows: [["Region", "Revenue"], ["North", 128000], ["South", 96500]], note: "Sample data" });
+    case "github_action":
+      return JSON.stringify({ number: 42, state: "open", title: details, url: "https://github.com/acme/app/pull/42" });
     default:
       return JSON.stringify({ error: `Unknown tool ${name}` });
   }
 }
 
-function buildTools(spec: AgentSpec): Anthropic.Beta.BetaToolUnion[] {
-  const tools: Anthropic.Beta.BetaToolUnion[] = [];
+function buildTools(spec: AgentSpec, extra: ExtraTool[] = []): Anthropic.Beta.BetaToolUnion[] {
+  const tools: Anthropic.Beta.BetaToolUnion[] = extra.map((t) => ({ name: t.name, description: t.description, input_schema: t.schema }));
   for (const id of spec.tools) {
     if (id === "web_search") {
       tools.push(
@@ -423,9 +544,10 @@ function buildTools(spec: AgentSpec): Anthropic.Beta.BetaToolUnion[] {
           ? { type: "web_search_20250305", name: "web_search", max_uses: 3 }
           : { type: "web_search_20260209", name: "web_search", max_uses: 3 },
       );
-    } else if (CLIENT_TOOLS[id]) {
-      const meta = TOOL_CATALOG.find((t) => t.id === id)!;
-      tools.push({ name: id, description: meta.description, input_schema: CLIENT_TOOLS[id] });
+    } else {
+      const schema = toolInputSchema(id);
+      const meta = TOOL_CATALOG.find((t) => t.id === id);
+      if (schema && meta) tools.push({ name: id, description: meta.description, input_schema: schema });
     }
   }
   return tools;
@@ -441,7 +563,7 @@ async function runClaude(
   toolCtx: ToolContext = {},
 ): Promise<{ text: string; tokens: number }> {
   const client = new Anthropic(apiKey ? { apiKey } : {});
-  const tools = buildTools(spec);
+  const tools = buildTools(spec, toolCtx.extraTools);
   const isOpus5 = spec.model === "claude-opus-5";
   const messages: Anthropic.Beta.BetaMessageParam[] = [...history, { role: "user", content: input }];
   const label = MODELS.find((m) => m.id === spec.model)!.label;
@@ -485,7 +607,7 @@ async function runClaude(
         toolUses.map(async (use) => {
           const toolInput = (use.input ?? {}) as Record<string, unknown>;
           const { output, live } = await executeToolCall(use.name, toolInput, toolCtx);
-          const meta = TOOL_CATALOG.find((t) => t.id === use.name);
+          const meta = TOOL_CATALOG.find((t) => t.id === use.name) ?? toolCtx.extraTools?.find((t) => t.name === use.name);
           step({ type: "tool", title: meta?.label ?? use.name, detail: JSON.stringify(toolInput).slice(0, 200), result: output.slice(0, 300), simulated: !live, live });
           return { type: "tool_result" as const, tool_use_id: use.id, content: output };
         }),
@@ -512,21 +634,25 @@ async function runOpenAI(
   passages: Passage[],
   apiKey?: string,
   toolCtx: ToolContext = {},
+  host?: CompatibleHost | null,
 ): Promise<{ text: string; tokens: number }> {
-  const client = openaiClient(apiKey);
-  const model = openaiModelFor(Boolean(apiKey), spec.model);
+  const client = host ? new OpenAI({ apiKey: host.apiKey, baseURL: host.baseURL }) : openaiClient(apiKey);
+  const model = host ? host.model : openaiModelFor(Boolean(apiKey), spec.model);
   const tools: OpenAI.Chat.Completions.ChatCompletionFunctionTool[] = spec.tools
-    .filter((id) => id === "web_search" || CLIENT_TOOLS[id])
+    .filter((id) => id === "web_search" || toolInputSchema(id))
     .map((id) => ({
       type: "function",
       function: {
         name: id,
-        description: TOOL_CATALOG.find((t) => t.id === id)!.description,
+        description: TOOL_CATALOG.find((t) => t.id === id)?.description ?? id,
         parameters: (id === "web_search"
           ? { type: "object", properties: { query: { type: "string" } }, required: ["query"] }
-          : CLIENT_TOOLS[id]) as Record<string, unknown>,
+          : toolInputSchema(id)) as Record<string, unknown>,
       },
     }));
+  for (const t of toolCtx.extraTools ?? []) {
+    tools.push({ type: "function", function: { name: t.name, description: t.description, parameters: t.schema as Record<string, unknown> } });
+  }
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
     { role: "system", content: systemPrompt(spec, passages) },
     ...history,
@@ -560,7 +686,7 @@ async function runOpenAI(
           args = {};
         }
         const { output, live } = await executeToolCall(call.function.name, args, toolCtx);
-        const meta = TOOL_CATALOG.find((t) => t.id === call.function.name);
+        const meta = TOOL_CATALOG.find((t) => t.id === call.function.name) ?? toolCtx.extraTools?.find((t) => t.name === call.function.name);
         step({ type: "tool", title: meta?.label ?? call.function.name, detail: JSON.stringify(args).slice(0, 200), result: output.slice(0, 300), simulated: !live, live });
         messages.push({ role: "tool", tool_call_id: call.id, content: output });
       }
