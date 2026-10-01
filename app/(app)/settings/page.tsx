@@ -1,5 +1,7 @@
 import { Columns, StatTile } from "@/components/metrics/charts";
-import { DangerZone, GitHubSection, ModelKeysForm, PreferencesForm, ProfileForm, Section, TeammatesSection } from "@/components/settings/settings-sections";
+import { DangerZone, DesignSystemSection, GitHubSection, ModelKeysForm, PreferencesForm, ProfileForm, Section } from "@/components/settings/settings-sections";
+import { WorkspacePanel } from "@/components/settings/workspace-panel";
+import { getDesignTokens } from "@/lib/actions/design";
 import { githubStatus } from "@/lib/actions/github";
 import { DAILY_CREDITS, currentCredits } from "@/lib/credits";
 import { decrypt } from "@/lib/crypto";
@@ -21,12 +23,13 @@ export default async function SettingsPage() {
   const { supabase, user } = await getUser();
   const { since, days } = lastDays(14);
 
-  const [{ data: profile }, { data: secrets }, credits, github, { data: events }] = await Promise.all([
+  const [{ data: profile }, { data: secrets }, credits, github, { data: events }, design] = await Promise.all([
     supabase.from("profiles").select("full_name, avatar_url, default_mode, experience_level, model_provider").eq("id", user!.id).single(),
     supabase.from("user_secrets").select("anthropic_key, openai_key").eq("owner_id", user!.id).maybeSingle(),
     currentCredits(supabase),
     githubStatus(),
     supabase.from("events").select("name, created_at").in("name", AI_EVENTS).gte("created_at", since.toISOString()),
+    getDesignTokens(),
   ]);
 
   const perDay = new Map(days.map((d) => [d, 0]));
@@ -67,12 +70,16 @@ export default async function SettingsPage() {
         <Columns data={days.map((d) => ({ label: d.slice(5), value: perDay.get(d)! }))} unit="AI actions" />
       </Section>
 
-      <Section title="Team" description="Invite teammates and manage their roles. RBAC and audit logs are available on Team and Enterprise plans.">
-        <TeammatesSection />
+      <Section title="Team" description="Workspaces, members and roles. Share a project with a workspace from its settings.">
+        <WorkspacePanel currentUserId={user!.id} />
       </Section>
 
       <Section title="GitHub" description="Used for importing repos and opening pull requests.">
         <GitHubSection login={github.connected ? github.login : null} />
+      </Section>
+
+      <Section title="Design system" description="Import your brand's tokens so generated apps use your colours, typography and spacing.">
+        <DesignSystemSection initial={design.tokens} setupNeeded={design.setupNeeded} />
       </Section>
 
       <Section title="Danger zone" danger>

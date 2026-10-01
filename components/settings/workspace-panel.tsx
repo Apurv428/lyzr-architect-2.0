@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, Loader2, Mail, Plus, Shield, Trash2, UserMinus, X } from "lucide-react";
+import { Check, Copy, Loader2, Mail, Plus, Shield, UserMinus, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,7 +9,7 @@ import {
   inviteMember,
   listInvites,
   listMembers,
-  listWorkspaces,
+  loadWorkspaces,
   removeMember,
   revokeInvite,
   updateMemberRole,
@@ -99,11 +99,13 @@ export function WorkspacePanel({ currentUserId }: { currentUserId: string }) {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<Exclude<WorkspaceRole, "owner">>("editor");
   const [busy, setBusy] = useState(false);
+  const [setupNeeded, setSetupNeeded] = useState(false);
 
   useEffect(() => {
-    listWorkspaces().then((ws) => {
-      setWorkspaces(ws);
-      if (ws.length && !selected) setSelected(ws[0]);
+    loadWorkspaces().then((res) => {
+      setWorkspaces(res.workspaces);
+      setSetupNeeded(res.setupNeeded);
+      setSelected((current) => current ?? res.workspaces[0] ?? null);
     });
   }, []);
 
@@ -135,7 +137,8 @@ export function WorkspacePanel({ currentUserId }: { currentUserId: string }) {
     const res = await inviteMember(selected.id, inviteEmail, inviteRole);
     setBusy(false);
     if ("error" in res) { toast.error(res.error); return; }
-    toast.success(`Invite sent to ${inviteEmail}.`);
+    // There's no mail service, so the owner sends the link themselves.
+    await copyInviteLink(res.invite.token, inviteEmail.trim());
     setInviteEmail("");
     listInvites(selected.id).then(setInvites);
   }
@@ -161,13 +164,25 @@ export function WorkspacePanel({ currentUserId }: { currentUserId: string }) {
     setInvites((i) => i.filter((x) => x.id !== id));
   }
 
+  if (setupNeeded) {
+    return (
+      <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+        Team workspaces need the database update in <code>supabase/migrations/0011_workspaces.sql</code>.
+      </p>
+    );
+  }
+
   if (!workspaces) {
     return <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> Loading workspaces…</p>;
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
+      <p className="text-xs text-muted-foreground">
+        Invite teammates with a link, then share a project with the workspace from its settings. Members can open shared projects and comment on the
+        preview; editing stays with the project owner.
+      </p>
+      <div className="flex flex-wrap items-center gap-3">
         <div className="flex gap-2 overflow-x-auto">
           {workspaces.map((w) => (
             <button
@@ -222,7 +237,7 @@ export function WorkspacePanel({ currentUserId }: { currentUserId: string }) {
 
           {isOwner && (
             <div className="space-y-3 rounded-xl border p-4">
-              <h4 className="flex items-center gap-2 text-sm font-semibold"><Mail className="size-4" /> Invite by email</h4>
+              <h4 className="flex items-center gap-2 text-sm font-semibold"><Mail className="size-4" /> Invite a teammate</h4>
               <div className="flex gap-2">
                 <input
                   type="email"
@@ -240,7 +255,7 @@ export function WorkspacePanel({ currentUserId }: { currentUserId: string }) {
                   {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
                 </select>
                 <Button size="sm" onClick={invite} disabled={busy || !inviteEmail.trim()}>
-                  {busy ? <Loader2 className="animate-spin" /> : "Send"}
+                  {busy ? <Loader2 className="animate-spin" /> : "Create link"}
                 </Button>
               </div>
 
@@ -251,6 +266,9 @@ export function WorkspacePanel({ currentUserId }: { currentUserId: string }) {
                       <Mail className="size-3 shrink-0 text-muted-foreground" />
                       <span className="flex-1 truncate">{inv.email}</span>
                       <RoleBadge role={inv.role} />
+                      <button onClick={() => copyInviteLink(inv.token, inv.email)} aria-label={`Copy invite link for ${inv.email}`} className="text-muted-foreground hover:text-foreground">
+                        <Copy className="size-3.5" />
+                      </button>
                       <button onClick={() => revoke(inv.id)} aria-label="Revoke invite" className="text-muted-foreground hover:text-foreground">
                         <X className="size-3.5" />
                       </button>
@@ -272,6 +290,12 @@ export function WorkspacePanel({ currentUserId }: { currentUserId: string }) {
       )}
     </div>
   );
+}
+
+async function copyInviteLink(token: string, email: string) {
+  const link = `${window.location.origin}/invite/${token}`;
+  await navigator.clipboard.writeText(link).catch(() => undefined);
+  toast.success(`Invite link copied. Send it to ${email}: it works when they sign in with that email.`, { duration: 7000 });
 }
 
 function SSODomainField({ workspace, onSave }: { workspace: Workspace; onSave: (ws: Workspace) => void }) {

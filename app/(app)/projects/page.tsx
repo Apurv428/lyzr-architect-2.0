@@ -3,10 +3,12 @@ import { getUser } from "@/lib/supabase/server";
 import type { Project } from "@/lib/types";
 
 export default async function ProjectsPage() {
-  const { supabase } = await getUser();
+  const { supabase, user } = await getUser();
+  // Your own projects; ones shared with you through a workspace are listed on the dashboard.
   const { data } = await supabase
     .from("projects")
     .select("id, name, description, prompt, mode, template_id, framework, status, deploy_url, thumbnail_url, created_at, updated_at")
+    .eq("owner_id", user!.id)
     .order("updated_at", { ascending: false })
     .limit(500);
   const projects = (data ?? []) as Project[];

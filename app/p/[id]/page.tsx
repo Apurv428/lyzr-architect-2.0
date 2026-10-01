@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Workspace } from "@/components/workspace/workspace";
 import type { CheckpointMeta } from "@/lib/actions/checkpoints";
 import type { AgentRecord } from "@/lib/agent/types";
@@ -14,7 +14,7 @@ export default async function WorkspacePage(props: PageProps<"/p/[id]">) {
   if (!user) notFound();
 
   const [{ data: project }, { data: messages }, { data: latest }, credits, { data: checkpoints }, { data: agent }, { data: profile }] = await Promise.all([
-    supabase.from("projects").select("id, name, mode, github_repo, thumbnail_url").eq("id", id).single(),
+    supabase.from("projects").select("id, name, mode, github_repo, thumbnail_url, owner_id").eq("id", id).single(),
     supabase
       .from("messages")
       .select("id, role, kind, content, data, created_at")
@@ -39,6 +39,8 @@ export default async function WorkspacePage(props: PageProps<"/p/[id]">) {
   ]);
   const [current, previous] = latest ?? [];
   if (!project) notFound();
+  // A project shared through a workspace opens read-only for members: the live app plus comments.
+  if (project.owner_id !== user.id) redirect(`/p/${id}/preview`);
 
   return (
     <Workspace

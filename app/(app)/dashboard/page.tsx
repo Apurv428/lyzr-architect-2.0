@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FolderGit2, Sparkles } from "lucide-react";
+import { FolderGit2, Sparkles, Users } from "lucide-react";
 import { ProjectCard } from "@/components/dashboard/project-card";
 import { PromptBox } from "@/components/dashboard/prompt-box";
 import { TemplateGrid } from "@/components/dashboard/template-grid";
@@ -16,18 +16,27 @@ export default async function DashboardPage(props: PageProps<"/dashboard">) {
   const { prompt } = await props.searchParams;
   const { supabase, user } = await getUser();
 
-  const [{ data: profile }, { data: projects }] = await Promise.all([
+  const [{ data: profile }, { data: projects }, { data: sharedRows }] = await Promise.all([
     supabase.from("profiles").select("full_name, default_mode").eq("id", user!.id).single(),
     supabase
       .from("projects")
       .select("id, name, description, prompt, mode, template_id, framework, status, deploy_url, thumbnail_url, created_at, updated_at")
+      .eq("owner_id", user!.id)
       .order("updated_at", { ascending: false })
       .limit(9),
+    // Projects teammates shared through a workspace (visible once migration 0011 is in).
+    supabase
+      .from("projects")
+      .select("id, name, updated_at")
+      .neq("owner_id", user!.id)
+      .order("updated_at", { ascending: false })
+      .limit(6),
   ]);
 
   const firstName = (profile?.full_name ?? user!.email ?? "").split(/[\s@]/)[0];
   const mode = (profile?.default_mode ?? "guided") as Mode;
   const list = (projects ?? []) as Project[];
+  const shared = (sharedRows ?? []) as { id: string; name: string; updated_at: string }[];
 
   return (
     <div className="relative">
@@ -69,6 +78,22 @@ export default async function DashboardPage(props: PageProps<"/dashboard">) {
             </div>
           )}
         </section>
+
+        {shared.length > 0 && (
+          <section className="space-y-3">
+            <h2 className="flex items-center gap-2 text-lg font-semibold">
+              <Users className="size-5" /> Shared with you
+            </h2>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {shared.map((p) => (
+                <Link key={p.id} href={`/p/${p.id}/preview`} className="flex items-center justify-between gap-3 rounded-xl border bg-card/60 px-4 py-3 text-sm hover:border-primary/40">
+                  <span className="truncate font-medium">{p.name}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">View · comment</span>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section id="templates" className="grid gap-6 lg:grid-cols-[1fr_300px]">
           <div className="space-y-4">

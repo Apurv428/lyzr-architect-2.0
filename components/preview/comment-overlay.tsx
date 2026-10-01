@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Check, MessageSquare, X } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { addComment, listComments, resolveComment, type PreviewComment } from "@/lib/actions/workspaces";
-import { cn } from "@/lib/utils";
 import { timeAgo } from "@/lib/time";
 
 type Pin = { comment: PreviewComment; open: boolean };
@@ -48,14 +48,18 @@ export function CommentOverlay({
     setSaving(true);
     const res = await addComment(projectId, { x_pct: drafting.x, y_pct: drafting.y, body: draftBody, checkpoint_v: checkpointVersion });
     setSaving(false);
-    if ("error" in res) return;
+    if ("error" in res) {
+      toast.error(res.error);
+      return;
+    }
     setPins((prev) => [...prev, { comment: res.comment, open: true }]);
     setDrafting(null);
     setDraftBody("");
   }
 
   async function resolve(id: string) {
-    await resolveComment(id);
+    const res = await resolveComment(id);
+    if ("error" in res) return toast.error(res.error);
     setPins((prev) => prev.filter((p) => p.comment.id !== id));
   }
 

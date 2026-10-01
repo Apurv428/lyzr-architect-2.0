@@ -2,6 +2,11 @@
 
 import { getUser } from "@/lib/supabase/server";
 
+// PostgREST: missing table (PGRST205) or relation (42P01) means migration 0011 hasn't been run.
+const notSetUp = (code?: string) => code === "PGRST205" || code === "42P01";
+const COMMENTS_SETUP = "Comments need the database update in supabase/migrations/0011_workspaces.sql.";
+const TEAMS_SETUP = "Team workspaces need the database update in supabase/migrations/0011_workspaces.sql.";
+
 export type WorkspaceRole = "owner" | "admin" | "editor" | "viewer";
 
 export type Workspace = {
@@ -26,6 +31,8 @@ export type WorkspaceInvite = {
   workspace_id: string;
   email: string;
   role: WorkspaceRole;
+  /** The secret in the invite link; only the workspace's owners and admins can read invites. */
+  token: string;
   expires_at: string;
   created_at: string;
 };
@@ -58,24 +65,33 @@ export async function createWorkspace(name: string) {
     .insert({ name: trimmed, slug })
     .select("id, name, slug, plan, sso_domain, created_at")
     .single();
-  if (error || !ws) return { error: "Couldn't create workspace." };
-
-  // Add the creator as owner.
-  await supabase
-    .from("workspace_members")
-    .insert({ workspace_id: ws.id, user_id: user.id, role: "owner" });
-
+  // The database adds the creator as owner (trigger in 0011_workspaces.sql).
+  if (error || !ws) return { error: notSetUp(error?.code) ? TEAMS_SETUP : "Couldn't create workspace." };
   return { workspace: ws as Workspace };
 }
 
 export async function listWorkspaces(): Promise<Workspace[]> {
+  return (await loadWorkspaces()).workspaces;
+}
+
+/** The user's workspaces, plus whether the server still needs migration 0011. */
+export async function loadWorkspaces(): Promise<{ workspaces: Workspace[]; setupNeeded: boolean }> {
   const { supabase, user } = await getUser();
-  if (!user) return [];
-  const { data } = await supabase
+  if (!user) return { workspaces: [], setupNeeded: false };
+  const { data, error } = await supabase
     .from("workspaces")
     .select("id, name, slug, plan, sso_domain, created_at")
     .order("created_at");
-  return (data ?? []) as Workspace[];
+  return { workspaces: (data ?? []) as Workspace[], setupNeeded: notSetUp(error?.code) };
+}
+
+/** Shares a project with a workspace (or stops sharing, with null). Members can view it and comment. */
+export async function setProjectWorkspace(projectId: string, workspaceId: string | null) {
+  const { supabase } = await getUser();
+  const { error } = await supabase.from("projects").update({ workspace_id: workspaceId }).eq("id", projectId);
+  if (!error) return { ok: true as const };
+  if (notSetUp(error.code) || error.code === "PGRST204") return { error: TEAMS_SETUP };
+  return { error: error.code === "42501" ? "You can only share into a workspace where you're an owner, admin or editor." : error.message };
 }
 
 export async function getWorkspace(idOrSlug: string) {
@@ -99,12 +115,15 @@ export async function updateWorkspace(id: string, patch: Partial<Pick<Workspace,
 
 export async function listMembers(workspaceId: string): Promise<WorkspaceMember[]> {
   const { supabase } = await getUser();
-  const { data } = await supabase
-    .from("workspace_members")
-    .select("workspace_id, user_id, role, joined_at, profile:profiles(full_name, avatar_url)")
-    .eq("workspace_id", workspaceId)
-    .order("joined_at");
-  return (data ?? []) as unknown as WorkspaceMember[];
+  // Teammates' profiles are private, so names and emails come from a members-only database function.
+  const { data } = await supabase.rpc("workspace_member_list", { p_workspace: workspaceId });
+  return ((data ?? []) as { user_id: string; role: WorkspaceRole; joined_at: string; full_name: string | null; email: string | null }[]).map((m) => ({
+    workspace_id: workspaceId,
+    user_id: m.user_id,
+    role: m.role,
+    joined_at: m.joined_at,
+    profile: { full_name: m.full_name, avatar_url: null, email: m.email },
+  }));
 }
 
 export async function updateMemberRole(workspaceId: string, userId: string, role: WorkspaceRole) {
@@ -139,34 +158,31 @@ export async function inviteMember(workspaceId: string, email: string, role: Exc
     .upsert({ workspace_id: workspaceId, email: trimmed, role, invited_by: user.id }, { onConflict: "workspace_id,email" })
     .select("id, token")
     .single();
-  if (error || !data) return { error: "Couldn't send invite." };
+  if (error || !data) return { error: notSetUp(error?.code) ? TEAMS_SETUP : "Couldn't create the invite." };
   return { invite: data as { id: string; token: string } };
 }
 
-export async function acceptInvite(token: string) {
+export type AcceptResult =
+  | { status: "ok"; workspace_id: string; workspace: string }
+  | { status: "signed_out" | "not_found" | "expired" }
+  | { status: "wrong_email"; email: string }
+  | { status: "domain"; domain: string }
+  | { status: "error"; message: string };
+
+/** Joins the workspace behind an invite link (checked in the database: right email, SSO domain, not expired). */
+export async function acceptInvite(token: string): Promise<AcceptResult> {
   const { supabase, user } = await getUser();
-  if (!user) return { error: "Sign in first." };
-
-  const { data: invite } = await supabase
-    .from("workspace_invites")
-    .select("workspace_id, role, expires_at")
-    .eq("token", token)
-    .single();
-  if (!invite) return { error: "Invite not found or already used." };
-  if (new Date(invite.expires_at) < new Date()) return { error: "This invite has expired." };
-
-  await supabase
-    .from("workspace_members")
-    .upsert({ workspace_id: invite.workspace_id, user_id: user.id, role: invite.role }, { onConflict: "workspace_id,user_id" });
-  await supabase.from("workspace_invites").delete().eq("token", token);
-  return { workspaceId: invite.workspace_id };
+  if (!user) return { status: "signed_out" };
+  const { data, error } = await supabase.rpc("accept_workspace_invite", { p_token: token });
+  if (error) return { status: "error", message: notSetUp(error.code) || error.code === "PGRST202" ? TEAMS_SETUP : error.message };
+  return data as AcceptResult;
 }
 
 export async function listInvites(workspaceId: string): Promise<WorkspaceInvite[]> {
   const { supabase } = await getUser();
   const { data } = await supabase
     .from("workspace_invites")
-    .select("id, workspace_id, email, role, expires_at, created_at")
+    .select("id, workspace_id, email, role, token, expires_at, created_at")
     .eq("workspace_id", workspaceId)
     .gt("expires_at", new Date().toISOString())
     .order("created_at");
@@ -218,7 +234,7 @@ export async function addComment(
     .insert({ project_id: projectId, author_id: user.id, x_pct, y_pct, body: trimmed, checkpoint_v })
     .select("id, project_id, checkpoint_v, author_id, x_pct, y_pct, body, resolved, created_at")
     .single();
-  if (error || !data) return { error: "Couldn't save comment." };
+  if (error || !data) return { error: notSetUp(error?.code) ? COMMENTS_SETUP : "Couldn't save comment." };
   return { comment: data as PreviewComment };
 }
 

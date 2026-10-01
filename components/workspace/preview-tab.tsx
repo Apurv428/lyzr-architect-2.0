@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowUp, Eye, ExternalLink, Loader2, Monitor, MousePointerClick, RotateCw, Smartphone, Tablet, X } from "lucide-react";
+import { ArrowUp, Eye, ExternalLink, Loader2, MessageSquare, Monitor, MousePointerClick, RotateCw, Smartphone, Tablet, X } from "lucide-react";
+import { CommentOverlay } from "@/components/preview/comment-overlay";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { SelectedElement } from "@/lib/workspace/sandbox";
+import { postToProjectSlack } from "@/lib/actions/agents";
 import { trackClientEvent } from "@/lib/actions/events";
 import { useChat } from "@/lib/workspace/use-chat";
 import { saveThumbnail } from "@/lib/workspace/thumbnail";
@@ -59,7 +61,9 @@ function SelectionPrompt({ selection }: { selection: SelectedElement }) {
   const { send, streaming } = useChat();
   const [value, setValue] = useState("");
   const input = useRef<HTMLInputElement>(null);
-  useEffect(() => input.current?.focus(), [selection]);
+  useEffect(() => {
+    input.current?.focus();
+  }, [selection]);
 
   function submit() {
     if (!value.trim() || streaming) return;
@@ -116,6 +120,8 @@ export function PreviewTab() {
   const selection = useWorkspace((s) => s.selection);
   const previewKey = useWorkspace((s) => s.previewKey);
   const previewRuntime = useWorkspace((s) => s.previewRuntime);
+  const checkpointCount = useWorkspace((s) => s.checkpoints.length);
+  const [commenting, setCommenting] = useState(false);
   const { send } = useChat();
   const hasFiles = Object.keys(files).length > 0;
 
@@ -152,6 +158,7 @@ export function PreviewTab() {
     },
     [send, projectId],
   );
+  const onSlack = useCallback((text: string) => postToProjectSlack(projectId, text), [projectId]);
 
   if (!hasFiles) {
     return (
@@ -202,6 +209,18 @@ export function PreviewTab() {
             onClick={() => useWorkspace.getState().set({ selectMode: !selectMode, selection: null })}
           >
             <MousePointerClick /> {selectMode ? "Click an element…" : "Select to edit"}
+          </Button>
+        )}
+        {previewRuntime === "sandpack" && (
+          <Button
+            size="xs"
+            variant={commenting ? "default" : "ghost"}
+            onClick={() => {
+              setCommenting((v) => !v);
+              useWorkspace.getState().set({ selectMode: false, selection: null });
+            }}
+          >
+            <MessageSquare /> {commenting ? "Click to pin a comment" : "Comment"}
           </Button>
         )}
         <div className="ml-auto flex items-center gap-1">
@@ -260,7 +279,11 @@ export function PreviewTab() {
               onSelect={onSelect}
               onAutoFix={streaming ? undefined : onAutoFix}
               onCapture={needsThumbnail ? onCapture : undefined}
+              onSlack={onSlack}
             />
+          )}
+          {previewRuntime === "sandpack" && (
+            <CommentOverlay projectId={projectId} checkpointVersion={checkpointCount} enabled={commenting && !selectMode} />
           )}
           {previewRuntime === "webcontainer" && (
             <WebContainerPreview key={`wc-${checkpointId}-${previewKey}`} files={files} projectId={projectId} />
