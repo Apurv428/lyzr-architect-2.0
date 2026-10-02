@@ -54,3 +54,8 @@ next-env.d.ts
 /REMAINING.md
 /SUBMISSION.md
 /ASSIGNMENT-AUDIT.md
+
+# Personal test plan and one-paste setup SQL (not part of the submission)
+TEST-PLAN.xlsx
+SETUP-migrations-0010-0017.sql
+SETUP-new-project-0001-0017.sql

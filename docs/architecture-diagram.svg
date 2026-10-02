@@ -23,7 +23,7 @@
 <rect x="50" y="490" width="4" height="26" rx="2" fill="#6366f1"/>
 <text x="66" y="507" font-size="15" font-weight="700" fill="#0f172a">Other apps and services</text>
 <text x="66" y="529" font-size="12.5" fill="#475569">Agent API key or webhook URL</text>
-<text x="66" y="547" font-size="12.5" fill="#475569">call agents over HTTPS</text>
+<text x="66" y="547" font-size="12.5" fill="#475569">call agents over HTTPS or MCP</text>
 <rect x="50" y="600" width="260" height="110" rx="12" fill="#ffffff" stroke="#6366f1" stroke-width="1.8"/>
 <rect x="50" y="610" width="4" height="26" rx="2" fill="#6366f1"/>
 <text x="66" y="627" font-size="15" font-weight="700" fill="#0f172a">External cron (optional)</text>
@@ -40,7 +40,7 @@
 <rect x="400" y="230" width="4" height="26" rx="2" fill="#0f172a"/>
 <text x="416" y="247" font-size="15" font-weight="700" fill="#0f172a">Signed-in API (user session → RLS)</text>
 <text x="416" y="269" font-size="12.5" fill="#475569">/api/chat · ask → plan → write_files (NDJSON)</text>
-<text x="416" y="287" font-size="12.5" fill="#475569">/api/agents/test · /api/agents/evals</text>
+<text x="416" y="287" font-size="12.5" fill="#475569">/api/agents/test · evals · autopilot</text>
 <text x="416" y="305" font-size="12.5" fill="#475569">/api/deploy · server actions: projects, imports,</text>
 <text x="416" y="323" font-size="12.5" fill="#475569">GitHub, workspaces, schedules, design tokens</text>
 <rect x="400" y="390" width="400" height="130" rx="12" fill="#ffffff" stroke="#0f172a" stroke-width="1.8"/>
@@ -49,6 +49,7 @@
 <text x="416" y="439" font-size="12.5" fill="#475569">/api/v1/agents/:id/run · API key · 60/min</text>
 <text x="416" y="457" font-size="12.5" fill="#475569">/api/hooks/:token · 30/min · signed forward</text>
 <text x="416" y="475" font-size="12.5" fill="#475569">/api/cron/schedules · Bearer CRON_SECRET</text>
+<text x="416" y="493" font-size="12.5" fill="#475569">/api/mcp/:id · the agent as an MCP server</text>
 <rect x="400" y="540" width="400" height="180" rx="12" fill="#ffffff" stroke="#0f172a" stroke-width="1.8"/>
 <rect x="400" y="550" width="4" height="26" rx="2" fill="#0f172a"/>
 <text x="416" y="567" font-size="15" font-weight="700" fill="#0f172a">Agent runtime · runAgent()</text>
@@ -56,7 +57,8 @@
 <text x="416" y="607" font-size="12.5" fill="#475569">knowledge: BM25 + pgvector, page citations</text>
 <text x="416" y="625" font-size="12.5" fill="#475569">MCP client · coordinator → specialists</text>
 <text x="416" y="643" font-size="12.5" fill="#475569">guardrails · PII redaction · step trace</text>
-<text x="416" y="661" font-size="12.5" fill="#475569">evals · simulations · 1-in-10 sampling</text>
+<text x="416" y="661" font-size="12.5" fill="#475569">evals · Autopilot: red-team → fix → re-test</text>
+<text x="416" y="679" font-size="12.5" fill="#475569">1-in-10 traffic sampling → suggested tests</text>
 <rect x="870" y="100" width="700" height="200" rx="18" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
 <text x="888" y="126" font-size="13" font-weight="700" letter-spacing="1.2" fill="#0284c7">MODEL LAYER · LIB/AI/PROVIDER.TS</text>
 <rect x="890" y="140" width="210" height="72" rx="12" fill="#ffffff" stroke="#0284c7" stroke-width="1.8"/>

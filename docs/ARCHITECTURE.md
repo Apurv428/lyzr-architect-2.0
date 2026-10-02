@@ -116,7 +116,10 @@ The judging asks for this walkthrough explicitly. Every step names the code that
 
 **Why Sandpack first.** There's no infrastructure and no cold start, so a non-technical user sees their app in about a second. The trade-off is that generated apps have no server of their own; they reach real services through the platform (Slack posts, agent runs).
 
-**Isolation headers.** WebContainers need `Cross-Origin-Embedder-Policy: require-corp`, which blocks the Sandpack iframe and cross-origin avatars. `next.config.ts` therefore sends COOP/COEP only on `/p/:id?runtime=webcontainer`.
+**Isolation headers.** WebContainers need cross-origin isolation, which blocks the Sandpack iframe and cross-origin avatars. `next.config.ts` therefore sends COOP/COEP only on `/p/:id?runtime=webcontainer`.
+- **`credentialless`, not `require-corp`:** the generated app loads Tailwind from a CDN that sends no CORP header. Under `require-corp` that script is blocked and the preview renders unstyled; `credentialless` loads it without cookies.
+- **Both sides must agree:** the header and `WebContainer.boot({ coep: "credentialless" })` use the same value.
+- **Browser support:** Chrome and Edge, which is also where WebContainers run.
 
 ### In production
 
@@ -175,8 +178,8 @@ Keeping the user in the loop is the right default for the Guided persona. The mi
 
 One runner, `runAgent` in `lib/agent/run.ts`, serves:
 - the test console;
-- evals and simulations;
-- the public Agent API;
+- evals and Autopilot;
+- the public Agent API, and the same agent served over MCP;
 - inbound webhooks;
 - the scheduler.
 
@@ -185,12 +188,19 @@ input
   → trigger, knowledge retrieval (BM25 + pgvector, rank-fused) with page citations
   → guardrail rules into the system prompt
   → coordinator (Manager → Specialist sub-agents), if present
-  → tool loop: model call → tool calls → results → model call … (max 6 turns)
+  → tool loop: model call → tool calls → results → model call … (max 6 turns; tools are off on the last one, so it always answers)
        tools = catalog tools (live: web search on Claude, Slack; others simulated and labelled)
              + MCP server tools (live)
   → PII redaction on the reply
   → output + trace (every step: type, input, result, ms, tokens, live/simulated)
 ```
+
+**Run context.** Signed-in runs (test console, evals, Autopilot) pass the user's own Supabase client, so row-level security still applies. It unlocks:
+- the coordinator reading its linked specialists;
+- pgvector search, fused with BM25;
+- OAuth connectors (Slack, Gmail, HubSpot).
+
+Public runs (API, MCP, webhooks, schedules) have no session. They get documents from their begin RPC, rank with BM25, and the coordinator answers alone. In production, a security-definer read of the linked specialists closes that gap.
 
 **MCP.** An MCP block connects the agent to any Model Context Protocol server over Streamable HTTP (`lib/agent/mcp.ts`). Each run:
 1. performs the `initialize` handshake;
@@ -202,8 +212,30 @@ input
 - **Encrypted tokens:** tokens are encrypted when the agent is saved and never appear in exported code.
 
 **Evals.** Saved tests come in three kinds: text present, text absent, or AI judge.
-- **Simulate tab:** runs six adversarial scenarios against the current canvas: prompt injection, card numbers, harmful requests and more.
 - **Sampled traffic:** 1 in 10 API and webhook runs becomes a *suggested* test (inside `api_finish_run` and `webhook_finish_run`).
+
+**Autopilot: the agent improves itself** (`lib/agent/autopilot.ts`, `app/api/agents/autopilot`, `components/agent/autopilot-tab.tsx`):
+
+```
+generate  model reads the agent's instructions, rules, tools, knowledge
+          → 6 scenarios aimed at it: 2 core-job edge cases, injection, personal data, off-topic, invented promises
+run       the eval runner streams each scenario through runAgent; an AI judge grades it   (no new runner)
+fix       model reads only the failures: message, expected behaviour, actual reply, judge's reason
+          → { diagnosis, up to 4 new rules, rewritten instructions or null }
+apply     applyFix() appends rules to the guardrail connected to the Brain (or adds one), swaps instructions
+re-test   every scenario again, not just the failures, so a fix that breaks a passing case shows in the score
+```
+
+- **Small, reviewable fixes:** rules first, instructions only when rules can't fix it; the diff is shown before it's applied and autosave versions the graph.
+- **Never a dead end:** without a model, or if the reply can't be parsed, the standard six scenarios run instead; errored cases are shown as "not graded" rather than passes.
+- **Cost:** one credit per model step (generate, fix), plus the usual eval run cost; free with your own key.
+- **Keeps paying off:** scenarios can be saved as regression tests in one click.
+
+**Agents as MCP servers** (`lib/agent/mcp-server.ts`, `app/api/mcp/[agentId]`). The reverse of the MCP block: every agent is itself an MCP server, so Claude Desktop, Cursor, VS Code or another agent can call it.
+- **Transport:** Streamable HTTP with plain JSON replies (no server-initiated stream; `GET` is 405, which clients treat as "POST only"). Batches of up to 20 messages; notifications get 202.
+- **Protocol:** `initialize` (negotiates 2025-06-18, 2025-03-26 or 2024-11-05), `ping`, `tools/list` (one `ask_<agent>` tool taking `message` and optional `history`), `tools/call`; empty `resources/list` and `prompts/list`.
+- **Auth:** the agent's API key as a Bearer token. A missing key is a 401 with `WWW-Authenticate`; a wrong or revoked key is a 401 with `error="invalid_token"`, so clients ask for a new one.
+- **One code path:** `runWithApiKey()` (`lib/agent/api-run.ts`) is shared with `/api/v1`, so MCP calls get the same rate limit, credits, logs, Usage chart and traffic sampling.
 
 ---
 
@@ -224,6 +256,8 @@ input
 | GPT-5.5 | OpenAI SDK |
 | Gemini | `GEMINI_API_KEY`, or the platform key when it already points at Gemini (`compatibleHost()`) |
 | Llama | Any OpenAI-compatible host via `LLAMA_BASE_URL`: Groq, Together, OpenRouter, local Ollama |
+
+**Free-tier rate limits.** Gemini's free tier allows 15 requests a minute, and one Autopilot pass makes about 13 calls. Clients for OpenAI-compatible hosts use `patientFetch` (`lib/ai/provider.ts`): on a per-minute 429 it waits the `retryDelay` Google returns (up to a minute) and retries once. The cooldown is shared by every call in the process, so parallel eval cases wait together. Daily quotas and long waits fail fast with a clear message.
 
 **Unconfigured models:**
 - **Gemini or Llama without a host:** the run stops with a clear message instead of a stack trace.
@@ -385,7 +419,7 @@ The agent API, inbound webhooks and the scheduler run with no signed-in user. Ea
 
 | Entry point | Credential | Begin / claim | Finish |
 |---|---|---|---|
-| `POST /api/v1/agents/:id/run` | API key (`arc_live_…`), stored as SHA-256 | `api_begin_run`: key check, 60/min rate limit | `api_finish_run`: log, credit, 1-in-10 eval sampling |
+| `POST /api/v1/agents/:id/run` and `POST /api/mcp/:id` | API key (`arc_live_…`), stored as SHA-256 | `api_begin_run`: key check, 60/min rate limit | `api_finish_run`: log, credit, 1-in-10 eval sampling |
 | `POST /api/hooks/:token` | Webhook URL token (`whk_…`), stored as SHA-256 | `webhook_begin_run`: 30/min rate limit, pause state | `webhook_finish_run`; optional signed forward (`X-Architect-Signature: t=…,v1=HMAC-SHA256`) |
 | `GET /api/cron/schedules` | `CRON_SECRET`, which equals a secret generated by migration 0017 | `scheduler_claim`: due schedules, `FOR UPDATE SKIP LOCKED`, next run set in the schedule's timezone | `scheduler_finish`: log (source `schedule`), credit |
 
@@ -450,7 +484,7 @@ cron-job.org or Vercel Cron work the same way. Vercel's Hobby plan only allows d
 | Auth (email, Google), Postgres with row-level security, Storage | Agent tools other than web search, Slack and MCP: they return realistic sample data marked "simulated" |
 | Builder: questions → plan → build, checkpoints, Auto-fix, select-to-edit | Deploy build logs, custom-domain DNS, VPC deploy |
 | Preview: Sandpack, WebContainer | E2B preview (needs a key, and file upload isn't written yet) |
-| Agents: test console, evals, simulation, knowledge with citations, multi-agent, MCP | Marketplace listings (sample data, labelled "Preview") |
+| Agents: test console, evals, Autopilot, knowledge with citations, multi-agent, MCP client and server | Marketplace listings (sample data, labelled "Preview") |
 | Agent API, inbound webhooks, schedules, real Slack posts | Pricing page |
 | GitHub: connect, import real files, ZIP import, new repo, pull requests | |
 | Workspaces, invite links, read-only sharing, preview comments | |

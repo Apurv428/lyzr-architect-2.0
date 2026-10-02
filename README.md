@@ -37,8 +37,9 @@ The same person can be non-technical about deployment and technical about prompt
 1. **Plan before build.** Nothing is generated until the user approves a plan covering screens, data, agent steps and rules. In Guided mode, vague requests first get a few one-click questions, and the plan card can be edited directly. This removes blank-prompt anxiety and wasted generations.
 2. **Never stuck.** Every AI change is a checkpoint. Restore is one click and never destroys history. Preview errors come with **Auto-fix**.
 3. **Explain, don't hide.** Every change says *what changed and why*. Pro users also get the diff.
-4. **Agents are first-class.** The app and its agent (tools, knowledge, guardrails) are designed together and tested with a step-by-step trace.
+4. **Agents are first-class.** The app and its agent (tools, knowledge, guardrails) are designed together and tested with a step-by-step trace. **Autopilot** then red-teams the agent, fixes the rules it broke and proves the fix with a before → after score.
 5. **Own your code.** Import from GitHub, push to a new repo, or open a PR. There's no lock-in.
+6. **Meet builders where they work.** Every agent is also an **MCP server**, so it can be called from Cursor, VS Code, Claude Desktop or another agent with one pasted config.
 
 ## 4. Core flows
 
@@ -71,12 +72,14 @@ All eight required features are present. I'd rather be explicit than let a demo 
 | — models | ✅ Real | Claude Opus 5 / Sonnet 5 / Haiku 4.5, GPT-5.5, Gemini, Llama (any OpenAI-compatible host); bring your own keys in Settings |
 | — tools | ✅ / 🟡 | Live: web search (Claude), Slack, **MCP servers** (any Streamable-HTTP server; tokens encrypted). The other 25+ catalog tools (Notion, Jira, HubSpot…) return realistic results labelled "simulated" |
 | — knowledge files | ✅ Real | PDF/TXT/MD split into passages; keyword (BM25) ranking, plus semantic search with pgvector once migration 0010 is in; answers cite file and page |
-| — multi-agent | ✅ Real | A Coordinator block delegates to Specialist agents; the trace shows each hand-off |
+| — multi-agent | ✅ Real | A Coordinator block delegates to Specialist agents; the trace shows each hand-off (test console and evals; API, MCP, webhook and scheduled runs answer with the coordinator alone for now) |
 | — guardrails | ✅ Real | Rules in the prompt, "Safe AI" presets, PII redaction on replies |
 | — schedules | ✅ Real · needs 0017 + cron | Trigger "Schedule": times, weekdays and timezone; runs on time through `/api/cron/schedules` (see docs/ARCHITECTURE.md §10) |
 | — framework code | 🟡 Generated starter | LangGraph, CrewAI, OpenAI Agents SDK, Claude Agent SDK, Google ADK, Lyzr blueprint; kept in sync with the canvas, export-only |
-| **Evals** | ✅ Real | Saved tests (contains / doesn't contain / AI judge), pass-rate history, **Simulate** (6 adversarial scenarios against the live agent), suggested tests sampled from real traffic (needs 0014) |
+| **Evals** | ✅ Real | Saved tests (contains / doesn't contain / AI judge), pass-rate history, suggested tests sampled from real traffic (needs 0014) |
+| **Autopilot** (self-improving agents) | ✅ Real | Writes 6 scenarios aimed at *this* agent's job and rules (edge cases, injection, personal data, off-topic, invented promises), runs them, reads the failures, proposes new rules or rewritten instructions, applies them and re-tests everything: e.g. 3/6 → 6/6. Scenarios can be saved as regression tests |
 | **Agent API** | ✅ Real | Per-agent keys (`arc_live_…`, SHA-256 hashed, revocable), 60 requests/min, cURL/JS/Python snippets |
+| **Agents as MCP servers** | ✅ Real | `POST /api/mcp/:agentId` speaks MCP (Streamable HTTP, protocol 2024-11-05 → 2025-06-18); the agent appears as one `ask_<agent>` tool. Copy-paste config for Cursor, VS Code and Claude Desktop; same keys, rate limits, credits and logs as the API |
 | **Inbound webhooks** | ✅ Real | Integrations page: a secret URL per agent, pause, rotate, recent calls, optional HMAC-signed forward of the result |
 | **GitHub integration** | ✅ Real | Connect, list repos, detect the stack, **import the repo's real files**, push a new repo, open pull requests that change the real files; GitAgent sets branch prefix, commit style and PR conventions |
 | ZIP import / export | ✅ Real | Upload a local project as a ZIP; "Download" exports a runnable Vite project (`npm install && npm run dev`) |
@@ -113,7 +116,7 @@ The full design is in **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)**. It cov
 - **Deploy = a frozen checkpoint,** so a live app never changes under a user's feet, and rollback is just choosing a different snapshot.
 
 **Tests:**
-- `npm test` runs Vitest: 136 unit tests. They cover schemas, imports and ZIP files, the tool catalog, MCP (protocol against a mocked server), model routing, generated code, design tokens, GitAgent, artifacts, webhooks, evals, retrieval, encryption and redirects.
+- `npm test` runs Vitest: 146 unit tests. They cover schemas, imports and ZIP files, the tool catalog, MCP (client against a mocked server, and the agent-as-server protocol), Autopilot fixes, free-tier rate-limit retries, model routing, generated code, design tokens, GitAgent, artifacts, webhooks, evals, retrieval, encryption and redirects.
 - `npm run test:e2e` runs Playwright on desktop and mobile.
 - The SQL migrations are checked on a local Postgres: 69 checks of access rules, invites, sharing, webhooks, sampling and scheduling.
 

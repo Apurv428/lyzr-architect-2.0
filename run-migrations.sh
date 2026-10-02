@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DB_HOST="db.jrwvplbvcwxejrhwkxdj.supabase.co"
+DB_HOST="db.xlfskmpvhdgrotvsuovd.supabase.co"
 DB_USER="postgres"
 DB_NAME="postgres"
 DB_PORT="5432"
