@@ -3,9 +3,9 @@
 **Describe it. Approve the plan. Ship the agent.**
 A vibe-coding platform for agentic apps, where technical and non-technical builders work on the same project.
 
-- **Live app:** `<add Vercel URL>`
-- **Demo walkthrough (3 min):** `<add Loom link>`
-- **Demo login:** `<demo email / password>`
+- **Live app:** https://lyzr-architect-2-0-orcin.vercel.app
+- **Demo walkthrough (5 min):** `<add Loom link>`
+- **Try it:** sign up with any email and password. There's no email confirmation, and every account gets 100 credits a day.
 
 ---
 
