@@ -207,14 +207,15 @@ export type PreviewComment = {
   body: string;
   resolved: boolean;
   created_at: string;
-  author: { full_name: string | null; avatar_url: string | null } | null;
 };
 
 export async function listComments(projectId: string): Promise<PreviewComment[]> {
   const { supabase } = await getUser();
   const { data } = await supabase
     .from("preview_comments")
-    .select("id, project_id, checkpoint_v, author_id, x_pct, y_pct, body, resolved, created_at, author:profiles(full_name, avatar_url)")
+    // No join to profiles: comments reference auth.users, so PostgREST has no relationship to follow
+    // and the whole query would fail, leaving saved pins invisible after a reload.
+    .select("id, project_id, checkpoint_v, author_id, x_pct, y_pct, body, resolved, created_at")
     .eq("project_id", projectId)
     .eq("resolved", false)
     .order("created_at");
