@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { createApiKey, listApiKeys, revokeApiKey, type ApiKeyRow } from "@/lib/actions/api-keys";
 import { listDeployments, promoteDeployment, renameDeploymentSlug } from "@/lib/actions/deployments";
+import { toolNameFor } from "@/lib/agent/mcp-server";
 import { deploymentUrl, type Deployment } from "@/lib/deploy";
 import { timeAgo } from "@/lib/time";
 import { useWorkspace } from "@/lib/workspace/store";
@@ -27,35 +28,71 @@ function Section({ icon: Icon, title, badge, children }: { icon: typeof Rocket; 
 
 const noSubscribe = () => () => {};
 
-function Snippets({ agentId, apiKey }: { agentId: string; apiKey: string | null }) {
-  const [lang, setLang] = useState<"curl" | "js" | "python">("curl");
+type SnippetLang = "curl" | "js" | "python" | "cursor" | "vscode" | "claude";
+
+const REST: { id: SnippetLang; label: string }[] = [
+  { id: "curl", label: "cURL" },
+  { id: "js", label: "JavaScript" },
+  { id: "python", label: "Python" },
+];
+const MCP: { id: SnippetLang; label: string }[] = [
+  { id: "cursor", label: "Cursor" },
+  { id: "vscode", label: "VS Code" },
+  { id: "claude", label: "Claude Desktop" },
+];
+
+function Snippets({ agentId, agentName, apiKey }: { agentId: string; agentName: string; apiKey: string | null }) {
+  const [lang, setLang] = useState<SnippetLang>("curl");
   const origin = useSyncExternalStore(noSubscribe, () => window.location.origin, () => "");
   const endpoint = `${origin}/api/v1/agents/${agentId}/run`;
-  // Right after a key is created, the snippet exports it so it can be pasted straight into a terminal.
+  // The tool is named after the agent; the name rides along in the URL.
+  const mcpUrl = `${origin}/api/mcp/${agentId}?name=${encodeURIComponent(agentName)}`;
+  const serverKey = agentName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "architect-agent";
+  const bearer = `Bearer ${apiKey ?? "arc_live_…your key"}`;
+  const isMcp = MCP.some((m) => m.id === lang);
+  // Right after a key is created, the REST snippets export it so they paste straight into a terminal.
   const exportLine = apiKey ? (lang === "python" ? `# export ARCHITECT_API_KEY=${apiKey}\n` : lang === "js" ? `// ARCHITECT_API_KEY=${apiKey}\n` : `export ARCHITECT_API_KEY=${apiKey}\n`) : "";
-  const code =
-    exportLine +
-    {
-      curl: `curl -X POST ${endpoint} \\\n  -H "Authorization: Bearer $ARCHITECT_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d '{"input": "Where is my order #8812?"}'`,
-      js: `const res = await fetch("${endpoint}", {\n  method: "POST",\n  headers: {\n    Authorization: \`Bearer \${process.env.ARCHITECT_API_KEY}\`,\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({ input: "Where is my order #8812?" }),\n});\nconst { output, trace } = await res.json();`,
-      python: `import os, requests\n\nres = requests.post(\n    "${endpoint}",\n    headers={"Authorization": f"Bearer {os.environ['ARCHITECT_API_KEY']}"},\n    json={"input": "Where is my order #8812?"},\n)\nprint(res.json()["output"])`,
-    }[lang];
+  const code = {
+    curl: `${exportLine}curl -X POST ${endpoint} \\\n  -H "Authorization: Bearer $ARCHITECT_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d '{"input": "Where is my order #8812?"}'`,
+    js: `${exportLine}const res = await fetch("${endpoint}", {\n  method: "POST",\n  headers: {\n    Authorization: \`Bearer \${process.env.ARCHITECT_API_KEY}\`,\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({ input: "Where is my order #8812?" }),\n});\nconst { output, trace } = await res.json();`,
+    python: `${exportLine}import os, requests\n\nres = requests.post(\n    "${endpoint}",\n    headers={"Authorization": f"Bearer {os.environ['ARCHITECT_API_KEY']}"},\n    json={"input": "Where is my order #8812?"},\n)\nprint(res.json()["output"])`,
+    cursor: `// .cursor/mcp.json\n${JSON.stringify({ mcpServers: { [serverKey]: { url: mcpUrl, headers: { Authorization: bearer } } } }, null, 2)}`,
+    vscode: `// .vscode/mcp.json\n${JSON.stringify({ servers: { [serverKey]: { type: "http", url: mcpUrl, headers: { Authorization: bearer } } } }, null, 2)}`,
+    claude: `// claude_desktop_config.json (Settings → Developer → Edit config)\n${JSON.stringify(
+      { mcpServers: { [serverKey]: { command: "npx", args: ["-y", "mcp-remote", mcpUrl, "--header", "Authorization:${AUTH_HEADER}"], env: { AUTH_HEADER: bearer } } } },
+      null,
+      2,
+    )}`,
+  }[lang];
+
+  const tab = (l: { id: SnippetLang; label: string }) => (
+    <button key={l.id} onClick={() => setLang(l.id)} className={cn("rounded-md px-2 py-1 text-xs", lang === l.id ? "bg-muted text-foreground" : "text-muted-foreground")}>
+      {l.label}
+    </button>
+  );
+
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-1">
-        {(["curl", "js", "python"] as const).map((l) => (
-          <button key={l} onClick={() => setLang(l)} className={cn("rounded-md px-2 py-1 text-xs", lang === l ? "bg-muted text-foreground" : "text-muted-foreground")}>
-            {l === "js" ? "JavaScript" : l === "python" ? "Python" : "cURL"}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center gap-1">
+        {REST.map(tab)}
+        <span className="mx-1 h-4 w-px bg-border" />
+        <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-primary">MCP</span>
+        {MCP.map(tab)}
         <Button size="icon-xs" variant="ghost" className="ml-auto" aria-label="Copy snippet" onClick={() => navigator.clipboard.writeText(code).then(() => toast.success("Copied"))}>
           <Copy />
         </Button>
       </div>
       <pre className="overflow-x-auto rounded-lg border bg-black/50 p-3 font-mono text-[11px] leading-relaxed text-zinc-300">{code}</pre>
-      <p className="text-xs text-muted-foreground">
-        Returns <code className="font-mono">{"{ output, trace, tokens, latency_ms }"}</code>. Runs the last saved version of this agent · 60 requests/min per key · 1 credit per call (free with your own model key).
-      </p>
+      {isMcp ? (
+        <p className="text-xs text-muted-foreground">
+          This agent is also an MCP server: the client sees one tool, <code className="font-mono">{toolNameFor(agentName)}</code>, and can ask it anything. Same key, limits and
+          credits as the API. Paste the config, restart the client, and ask it to use the agent.
+        </p>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Returns <code className="font-mono">{"{ output, trace, tokens, latency_ms }"}</code>. Runs the last saved version of this agent · 60 requests/min per key · 1 credit per call (free with your own model key).
+        </p>
+      )}
     </div>
   );
 }
@@ -147,10 +184,11 @@ function ApiKeys({ agentId, onCreated }: { agentId: string; onCreated: (key: str
 
 function AgentApi({ agentId }: { agentId: string }) {
   const [apiKey, setApiKey] = useState<string | null>(null);
+  const agentName = useWorkspace((s) => s.agent?.name ?? "Architect agent");
   return (
     <div className="space-y-4">
       <ApiKeys agentId={agentId} onCreated={setApiKey} />
-      <Snippets agentId={agentId} apiKey={apiKey} />
+      <Snippets agentId={agentId} agentName={agentName} apiKey={apiKey} />
     </div>
   );
 }
