@@ -73,6 +73,10 @@ export async function POST(request: Request) {
             (await supabase.from("knowledge_docs").select("name, node_id, content").eq("agent_id", body.agentId)).data ?? [],
           onStep: (step) => send({ t: "step", step }),
           slackWebhookUrl,
+          // The user's own client (RLS applies): specialists for the coordinator, pgvector search, OAuth connectors.
+          supabase,
+          agentId: agent.id,
+          projectId: agent.project_id ?? undefined,
         });
         send({ t: "reply", text: run.text });
         const charged = !llm.byok;

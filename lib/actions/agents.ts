@@ -125,10 +125,10 @@ export async function postToProjectSlack(projectId: string, text: string): Promi
 }
 
 /** List agents the current user owns — used for the sub-agent picker. */
-export async function listUserAgents(excludeAgentId?: string): Promise<{ id: string; name: string; updated_at: string }[]> {
+export async function listUserAgents(excludeAgentId?: string): Promise<{ id: string; name: string; updated_at: string; project_id: string | null }[]> {
   const { supabase } = await getUser();
-  let q = supabase.from("agents").select(LIST_COLUMNS).order("updated_at", { ascending: false }).limit(50);
+  let q = supabase.from("agents").select(`${LIST_COLUMNS}, project_id`).order("updated_at", { ascending: false }).limit(50);
   if (excludeAgentId) q = q.neq("id", excludeAgentId);
   const { data } = await q;
-  return (data ?? []) as { id: string; name: string; updated_at: string }[];
+  return (data ?? []) as { id: string; name: string; updated_at: string; project_id: string | null }[];
 }

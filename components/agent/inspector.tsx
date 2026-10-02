@@ -259,13 +259,15 @@ function SubAgentPicker({
   excludeAgentId?: string;
   setConfig: (k: string, v: string) => void;
 }) {
-  const [agents, setAgents] = useState<{ id: string; name: string }[]>([]);
+  const [agents, setAgents] = useState<{ id: string; name: string; project_id: string | null }[]>([]);
 
   useEffect(() => {
     listUserAgents(excludeAgentId).then(setAgents);
   }, [excludeAgentId]);
 
   const linked = String(node.data.config.agentId || "");
+  // Agents live inside projects, so the link opens the linked agent's project.
+  const linkedProject = agents.find((a) => a.id === linked)?.project_id;
 
   return (
     <Field label="Linked agent" hint="The coordinator will call this agent's full pipeline.">
@@ -283,10 +285,10 @@ function SubAgentPicker({
           <option key={a.id} value={a.id}>{a.name}</option>
         ))}
       </select>
-      {linked && (
+      {linkedProject && (
         <button
           className="mt-1 text-[11px] text-primary underline"
-          onClick={() => window.open(`/p/${linked}`, "_blank")}
+          onClick={() => window.open(`/p/${linkedProject}`, "_blank")}
         >
           Open agent in new tab ↗
         </button>

@@ -45,7 +45,7 @@ export async function POST(request: Request) {
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   const [{ data: agent }, { data: rows }, credits, ai] = await Promise.all([
-    supabase.from("agents").select("id").eq("id", body.agentId).single(),
+    supabase.from("agents").select("id, project_id").eq("id", body.agentId).single(),
     supabase.from("eval_cases").select("id, input, expectation, kind, created_at").eq("agent_id", body.agentId).order("created_at"),
     currentCredits(supabase),
     userAI(supabase, user.id),
@@ -87,7 +87,7 @@ export async function POST(request: Request) {
           const t0 = Date.now();
           let result: EvalResult;
           try {
-            const run = await runAgent({ spec, input: c.input, history: [], llm, loadDocs });
+            const run = await runAgent({ spec, input: c.input, history: [], llm, loadDocs, supabase, agentId: agent.id, projectId: agent.project_id ?? undefined });
             const verdict =
               c.kind === "judge"
                 ? c.expectation
