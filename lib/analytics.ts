@@ -20,7 +20,9 @@ export type EventName =
   | "pr_opened"
   | "project_duplicated"
   | "project_deleted"
-  | "webhook_created";
+  | "webhook_created"
+  | "autopilot_generated"
+  | "autopilot_fixed";
 
 /** Record a product event. Never throws — analytics must not break the product. */
 export async function track(
