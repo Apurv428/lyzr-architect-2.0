@@ -15,11 +15,14 @@ export function ModeToggle({
   onChange,
   layoutId = "mode-pill",
   className,
+  compact = false,
 }: {
   value: Mode;
   onChange: (mode: Mode) => void;
   layoutId?: string;
   className?: string;
+  /** Icons only on phones; the labels stay for screen readers. */
+  compact?: boolean;
 }) {
   return (
     <div role="radiogroup" aria-label="Mode" className={cn("relative inline-flex rounded-lg bg-muted p-0.5", className)}>
@@ -32,6 +35,7 @@ export function ModeToggle({
           onClick={() => onChange(id)}
           className={cn(
             "relative z-10 inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+            compact && "px-2 sm:px-2.5",
             value === id ? "text-foreground" : "text-muted-foreground hover:text-foreground",
           )}
         >
@@ -43,7 +47,7 @@ export function ModeToggle({
             />
           )}
           <Icon className="size-3.5" />
-          {label}
+          <span className={compact ? "sr-only sm:not-sr-only" : undefined}>{label}</span>
         </button>
       ))}
     </div>

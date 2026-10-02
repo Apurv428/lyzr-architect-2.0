@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import type { BeforeMount } from "@monaco-editor/react";
 import { Code2, Download, Eye, FileCode2, GitCompareArrows, Loader2, Lock, Save, Undo2 } from "lucide-react";
@@ -90,6 +90,22 @@ export function CodeTab() {
     toast.success("Saved as a new checkpoint");
   }
 
+  // ⌘S / Ctrl+S saves the edits instead of opening the browser's "Save page" dialog.
+  const saveRef = useRef(save);
+  useEffect(() => {
+    saveRef.current = save;
+  });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        void saveRef.current();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   if (!paths.length) {
     return (
       <div className="bg-grid flex h-full items-center justify-center p-6 text-center">
@@ -114,7 +130,7 @@ export function CodeTab() {
         ) : (
           <span className="inline-flex items-center gap-1.5 text-muted-foreground">
             {editable ? <Code2 className="size-3.5" /> : <Lock className="size-3.5" />}
-            {editable ? "Edits are saved as a checkpoint" : "Read-only while Architect is working"}
+            {editable ? "Edits are saved as a checkpoint (Ctrl+S)" : "Read-only while Architect is working"}
           </span>
         )}
         <div className="ml-auto flex items-center gap-1.5">

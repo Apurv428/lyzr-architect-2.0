@@ -39,7 +39,7 @@ export function TopBar() {
   }
 
   return (
-    <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+    <header className="flex h-12 shrink-0 items-center gap-1.5 border-b px-2 sm:gap-2 sm:px-3">
       <Link href="/dashboard" aria-label="Back to dashboard" className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-4" />
         <LogoMark className="size-6" />
@@ -63,7 +63,7 @@ export function TopBar() {
       )}
 
       <span data-tour="mode" className="ml-1 inline-flex rounded-full">
-        <ModeToggle value={mode} onChange={changeMode} layoutId="workspace-mode" />
+        <ModeToggle value={mode} onChange={changeMode} layoutId="workspace-mode" compact />
       </span>
 
       <div className="ml-auto flex items-center gap-1">

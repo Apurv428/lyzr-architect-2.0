@@ -27,8 +27,9 @@ type WCInstance = {
 async function bootWebContainer(): Promise<WCInstance> {
   // Optional peer dep — not declared in package.json, loaded only in WebContainer mode.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const mod = await import("@webcontainer/api" as any) as { WebContainer: { boot(): Promise<WCInstance> } };
-  return mod.WebContainer.boot();
+  const mod = await import("@webcontainer/api" as any) as { WebContainer: { boot(options?: { coep?: "credentialless" }): Promise<WCInstance> } };
+  // Matches the page's COEP header (next.config.ts), so CDN scripts like Tailwind load in the preview.
+  return mod.WebContainer.boot({ coep: "credentialless" });
 }
 
 export function WebContainerPreview({ files, onReady }: Props) {
