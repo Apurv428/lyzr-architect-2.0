@@ -54,21 +54,22 @@ describe("executeToolCall — slack_message", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it("falls back to simulation when fetch throws (network error)", async () => {
+  it("reports a failure, not a simulated success, when Slack can't be reached", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network error")));
 
     const result = await executeToolCall("slack_message", { channel: "#eng", text: "Hi" }, { slackWebhookUrl: VALID_WEBHOOK });
 
-    expect(result.live).toBe(false);
-    expect(JSON.parse(result.output)).toMatchObject({ ok: true });
+    expect(result.live).toBe(true);
+    expect(JSON.parse(result.output)).toMatchObject({ ok: false, error: expect.stringMatching(/reach Slack/) });
   });
 
-  it("falls back to simulation when Slack returns a non-ok response", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500 }));
+  it("reports Slack's reason when it rejects the saved webhook", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404, text: async () => "no_team" }));
 
     const result = await executeToolCall("slack_message", { channel: "#eng", text: "Hi" }, { slackWebhookUrl: VALID_WEBHOOK });
 
-    expect(result.live).toBe(false);
+    expect(result.live).toBe(true);
+    expect(JSON.parse(result.output)).toMatchObject({ ok: false, error: expect.stringMatching(/404: no_team/) });
   });
 
   it("does not call fetch for non-Slack tools even with a webhook URL", async () => {

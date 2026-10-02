@@ -429,6 +429,8 @@ export async function executeToolCall(
       }
     }
     if (slackWebhookUrl && SLACK_WEBHOOK_RE.test(slackWebhookUrl)) {
+      // A saved webhook is a real attempt. When Slack turns it down, say why: a simulated "ok" here
+      // would have the agent report a post that never arrived.
       try {
         const res = await fetch(slackWebhookUrl, {
           method: "POST",
@@ -436,9 +438,16 @@ export async function executeToolCall(
           body: JSON.stringify({ text: String(input.text ?? "") }),
           signal: AbortSignal.timeout(5000),
         });
-        if (res.ok) return { output: JSON.stringify({ ok: true, channel: input.channel, ts: `${Math.floor(Date.now() / 1000)}.000200` }), live: true };
+        if (res.ok) {
+          return { output: JSON.stringify({ ok: true, channel: input.channel, note: "Posted through the saved webhook, which delivers to the channel it was created for." }), live: true };
+        }
+        const reason = (await res.text().catch(() => "")).trim().slice(0, 80);
+        return {
+          output: JSON.stringify({ ok: false, error: `Slack didn't accept the message (${res.status}${reason ? `: ${reason}` : ""}). It was not posted. Check the webhook saved for this project.` }),
+          live: true,
+        };
       } catch {
-        // fall through to simulate
+        return { output: JSON.stringify({ ok: false, error: "Couldn't reach Slack. The message was not posted." }), live: true };
       }
     }
   }
