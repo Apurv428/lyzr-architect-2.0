@@ -17,12 +17,34 @@ export function chatProvider(): Provider {
   return HAS_ANTHROPIC ? "anthropic" : HAS_OPENAI ? "openai" : "demo";
 }
 
+// Free tiers rate-limit by the minute (Gemini: 15 requests/min) and say how long to wait in the 429 body,
+// which the SDK's short backoff ignores. One cooldown is shared by every call in the process, so a burst
+// of parallel eval cases waits once together instead of each failing.
+let coolUntil = 0;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Exported for tests. Waits out a per-minute 429 (up to a minute) once, then retries the request. */
+export async function patientFetch(url: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const wait = coolUntil - Date.now();
+    if (wait > 0) await sleep(wait);
+    const res = await fetch(url, init);
+    if (res.status !== 429 || attempt > 0) return res;
+    const body = await res.clone().text().catch(() => "");
+    // A daily quota won't reset in time, and an empty account never will.
+    if (/PerDay|insufficient_quota/i.test(body)) return res;
+    const seconds = Number(/"retryDelay":\s*"(\d+(?:\.\d+)?)s"/.exec(body)?.[1]) || Number(res.headers.get("retry-after")) || 10;
+    if (seconds > 60) return res;
+    coolUntil = Math.max(coolUntil, Date.now() + seconds * 1000 + 250);
+  }
+}
+
 /**
  * OpenAI SDK client. The platform key follows OPENAI_BASE_URL, so an OpenAI-compatible provider (such as
  * Gemini's free tier) can stand in for OpenAI; a user's own key always goes to OpenAI itself.
  */
 export function openaiClient(apiKey?: string) {
-  return apiKey ? new OpenAI({ apiKey, baseURL: "https://api.openai.com/v1" }) : new OpenAI();
+  return apiKey ? new OpenAI({ apiKey, baseURL: "https://api.openai.com/v1" }) : new OpenAI(process.env.OPENAI_BASE_URL ? { fetch: patientFetch } : {});
 }
 
 /**

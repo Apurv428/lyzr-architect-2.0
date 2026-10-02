@@ -13,7 +13,7 @@ import { MODELS, TOOL_CATALOG } from "@/lib/agent/types";
 import type { TraceStep } from "@/lib/agent/trace";
 import type { ResolvedProvider } from "@/lib/ai/keys";
 import { McpSession, mcpToken, mcpToolName } from "@/lib/agent/mcp";
-import { compatibleHost, isOutOfCredits, openaiClient, openaiModelFor, supportsReasoningEffort, type CompatibleHost } from "@/lib/ai/provider";
+import { compatibleHost, isOutOfCredits, openaiClient, openaiModelFor, patientFetch, supportsReasoningEffort, type CompatibleHost } from "@/lib/ai/provider";
 
 // One agent runner shared by the test console, the public API and evals.
 
@@ -65,7 +65,8 @@ export function unavailableModel(spec: AgentSpec) {
 /** Turns SDK errors into short messages that are safe to show to users and API callers. */
 export function describeRunError(err: unknown) {
   if (isOutOfCredits(err)) return "The AI provider account is out of credits. Add your own model key in Settings to keep testing.";
-  if (err instanceof Anthropic.RateLimitError || err instanceof OpenAI.RateLimitError) return "The model is busy — try again in a few seconds.";
+  if (err instanceof OpenAI.RateLimitError && /PerDay/i.test(err.message)) return "The model's free daily quota is used up. Add your own model key in Settings, or try again tomorrow.";
+  if (err instanceof Anthropic.RateLimitError || err instanceof OpenAI.RateLimitError) return "The model is busy — try again in a minute.";
   if (err instanceof Anthropic.APIError || err instanceof OpenAI.APIError) return `Model error (${err.status}). Try again or switch models.`;
   if (err instanceof AgentRunError) return err.message;
   return "The agent run failed.";
@@ -576,7 +577,8 @@ async function runClaude(
       max_tokens: 16000,
       system: systemPrompt(spec, passages),
       messages,
-      ...(tools.length ? { tools } : {}),
+      // On the last turn tools are off, so a model that keeps calling them still answers with what it has.
+      ...(tools.length ? { tools, ...(turn === MAX_TURNS - 1 ? { tool_choice: { type: "none" as const } } : {}) } : {}),
       // Haiku 4.5 doesn't take an effort setting.
       ...(spec.model === "claude-haiku-4-5" ? {} : { output_config: { effort: "medium" as const } }),
       ...(isOpus5 ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
@@ -636,7 +638,7 @@ async function runOpenAI(
   toolCtx: ToolContext = {},
   host?: CompatibleHost | null,
 ): Promise<{ text: string; tokens: number }> {
-  const client = host ? new OpenAI({ apiKey: host.apiKey, baseURL: host.baseURL }) : openaiClient(apiKey);
+  const client = host ? new OpenAI({ apiKey: host.apiKey, baseURL: host.baseURL, fetch: patientFetch }) : openaiClient(apiKey);
   const model = host ? host.model : openaiModelFor(Boolean(apiKey), spec.model);
   const tools: OpenAI.Chat.Completions.ChatCompletionFunctionTool[] = spec.tools
     .filter((id) => id === "web_search" || toolInputSchema(id))
@@ -665,7 +667,7 @@ async function runOpenAI(
     const res = await client.chat.completions.create({
       model,
       messages,
-      ...(tools.length ? { tools } : {}),
+      ...(tools.length ? { tools, ...(turn === MAX_TURNS - 1 ? { tool_choice: "none" as const } : {}) } : {}),
       max_completion_tokens: 16000,
       ...(supportsReasoningEffort(model) ? { reasoning_effort: "low" as const } : {}),
     });
