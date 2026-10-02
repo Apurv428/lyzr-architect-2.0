@@ -75,7 +75,7 @@ function SelectionPrompt({ selection }: { selection: SelectedElement }) {
     ]
       .filter(Boolean)
       .join(" ");
-    send("message", `${value.trim()}\n\n${context}`);
+    send("message", `${value.trim()}\n\n${context}`, { intent: "edit" });
     useWorkspace.getState().set({ selection: null, selectMode: false });
   }
 
@@ -154,7 +154,7 @@ export function PreviewTab() {
   const onAutoFix = useCallback(
     (error: string) => {
       void trackClientEvent("autofix_clicked", projectId);
-      send("message", `The preview shows this error — please fix it:\n\n${error}`);
+      send("message", `The preview shows this error — please fix it:\n\n${error}`, { intent: "fix" });
     },
     [send, projectId],
   );

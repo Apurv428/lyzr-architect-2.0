@@ -1,20 +1,23 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback } from "react";
 import { toast } from "sonner";
 import type { ChatAction, ChatEvent } from "@/lib/ai/schema";
 import type { Attachment } from "@/lib/attachments";
 import { useWorkspace } from "./store";
 
+// The desktop and mobile layouts each mount a chat panel, so the stream is shared: whichever panel
+// started it, Stop in the visible one cancels it.
+let active: AbortController | null = null;
+
 export function useChat() {
   const streaming = useWorkspace((s) => s.streaming);
-  const abortRef = useRef<AbortController | null>(null);
 
   const cancel = useCallback(() => {
-    abortRef.current?.abort();
+    active?.abort();
   }, []);
 
-  const send = useCallback(async (action: ChatAction, input?: string, opts?: { retry?: boolean; intent?: "answers" | "skip"; attachments?: Attachment[] }) => {
+  const send = useCallback(async (action: ChatAction, input?: string, opts?: { retry?: boolean; intent?: "answers" | "skip" | "fix" | "edit"; attachments?: Attachment[] }) => {
     const store = useWorkspace.getState();
     if (store.streaming) return;
 
@@ -31,7 +34,7 @@ export function useChat() {
     store.set({ streaming: true, liveText: "", status: "Thinking…" });
 
     const controller = new AbortController();
-    abortRef.current = controller;
+    active = controller;
 
     try {
       const res = await fetch("/api/chat", {
@@ -63,7 +66,7 @@ export function useChat() {
       // Drop the optimistic message the server never confirmed.
       useWorkspace.setState((s) => ({ messages: s.messages.filter((m) => !m.id.startsWith("tmp-")) }));
     } finally {
-      abortRef.current = null;
+      if (active === controller) active = null;
       useWorkspace.getState().set({ streaming: false, liveText: "", status: null });
     }
   }, []);

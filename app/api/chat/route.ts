@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { DEMO_QUESTIONS, demoBuild, demoEdit, demoIntro, demoPlan, demoQuestions } from "@/lib/ai/demo";
+import { missedToolCall, type BuilderTool } from "@/lib/ai/missed-call";
 import { SYSTEM_PROMPT, TOOLS } from "@/lib/ai/prompt";
 import { loadAttachments, toClaudeBlocks, toOpenAIParts } from "@/lib/ai/attachments";
 import { resolveProvider, userAI, type ResolvedProvider } from "@/lib/ai/keys";
@@ -39,7 +40,7 @@ const Body = z.object({
   input: z.string().trim().max(4000).optional(),
   retry: z.boolean().optional(),
   /** The message answers (or skips) the question card. */
-  intent: z.enum(["answers", "skip"]).optional(),
+  intent: z.enum(["answers", "skip", "fix", "edit"]).optional(),
   attachments: z
     .array(z.object({ path: z.string().max(300), mime: z.string().max(60), name: z.string().max(200), size: z.number().int().nonnegative() }))
     .max(MAX_ATTACHMENTS)
@@ -71,6 +72,10 @@ type Turn = {
   userId: string;
   /** A Slack webhook is saved for this project, so the app's posts go out for real. */
   slackConnected: boolean;
+  /** Auto-fix: the preview crashed, so this turn must change code. */
+  fix: boolean;
+  /** Select-to-edit: the user pointed at an element and asked for a change to it. */
+  edit: boolean;
   /** The user's brand tokens as a prompt line (Settings → Design system), or "". */
   brand: string;
 };
@@ -132,6 +137,8 @@ export async function POST(request: Request) {
         llm,
         userId: user.id,
         slackConnected: Boolean(slackWebhook),
+        fix: intent === "fix",
+        edit: intent === "edit",
         brand: tokensForPrompt((brandRow as { design_tokens?: DesignTokens | null } | null)?.design_tokens),
       };
 
@@ -151,7 +158,7 @@ export async function POST(request: Request) {
           });
           turn.history.push(message);
           if (action === "approve") await track(supabase, "plan_approved", { mode: turn.project.mode }, projectId);
-          if (intent) await track(supabase, "questions_answered", { skipped: intent === "skip" }, projectId);
+          if (intent === "answers" || intent === "skip") await track(supabase, "questions_answered", { skipped: intent === "skip" }, projectId);
         }
 
         const ran =
@@ -213,7 +220,7 @@ function answeringQuestions(history: ChatMessage[]) {
   return [...history].reverse().find((m) => m.role === "assistant" && m.kind !== "text" && m.kind !== "error")?.kind === "questions";
 }
 
-function turnContext({ project, action, files, history, slackConnected, brand }: Turn) {
+function turnContext({ project, action, files, history, slackConnected, brand, fix, edit }: Turn) {
   const fileList = Object.entries(files);
   const filesBlock = fileList.length
     ? fileList.map(([path, content]) => `<file path="${path}">\n${content}\n</file>`).join("\n")
@@ -227,9 +234,13 @@ function turnContext({ project, action, files, history, slackConnected, brand }:
         ? latestPlan(history)?.edited
           ? "The user edited the latest plan themselves, then approved it. Follow the edited version exactly and build the complete app now with write_files."
           : "The user approved the latest plan. Build the complete app now with write_files."
-        : answeringQuestions(history)
-          ? "The user answered your questions. Propose a plan with propose_plan."
-          : "Respond to the user's latest message.";
+        : fix
+          ? "The app's preview crashed with the error in the user's message. Fix it now with write_files: change only what's needed, and write each changed file in full."
+          : edit
+            ? "The user selected an element in the preview and asked for a change to it. Make that change now with write_files: change only what's needed, and write each changed file in full."
+            : answeringQuestions(history)
+              ? "The user answered your questions. Propose a plan with propose_plan."
+              : "Respond to the user's latest message.";
 
   return `<context>
 Mode: ${project.mode === "pro" ? "Pro" : "Guided"}
@@ -393,13 +404,29 @@ async function runOpenAITurn(turn: Turn): Promise<boolean> {
     { role: "user", content: [...toOpenAIParts(files), { type: "text", text: turnContext(turn) }] },
   ];
 
-  const calls: { name: string; args: string }[] = [];
+  let calls: { name: string; args: string }[] = [];
   const announced = new Set<string>();
   let text = "";
   let finish: string | null = null;
 
-  send({ t: "status", label: "Thinking…" });
-  try {
+  const forced = (name: BuilderTool) => ({ tool_choice: { type: "function" as const, function: { name } } });
+  // Some OpenAI-compatible models (Gemini) announce "building now…" and end the turn without the call.
+  // An approval always means a build, a new project starts with questions or a plan, and
+  // answering the questions always leads to the plan. Auto-fix and select-to-edit always mean a
+  // code change, so they can't be answered with code or a summary pasted as text.
+  const firstChoice =
+    turn.action === "approve" || turn.fix || turn.edit
+      ? forced("write_files")
+      : turn.action === "start"
+        ? { tool_choice: "required" as const }
+        : answeringQuestions(turn.history)
+          ? forced("propose_plan")
+          : {};
+
+  const attempt = async (toolChoice: typeof firstChoice) => {
+    calls = [];
+    text = "";
+    finish = null;
     const stream = await client.chat.completions.create(
       {
         model,
@@ -408,16 +435,7 @@ async function runOpenAITurn(turn: Turn): Promise<boolean> {
         stream: true,
         max_completion_tokens: 32000,
         ...(supportsReasoningEffort(model) ? { reasoning_effort: turn.action === "approve" ? ("medium" as const) : ("low" as const) } : {}),
-        // Some OpenAI-compatible models (Gemini) announce "building now…" and end the turn without the call.
-        // An approval always means a build, a new project starts with questions or a plan, and
-        // answering the questions always leads to the plan.
-        ...(turn.action === "approve"
-          ? { tool_choice: { type: "function" as const, function: { name: "write_files" } } }
-          : turn.action === "start"
-            ? { tool_choice: "required" as const }
-            : answeringQuestions(turn.history)
-              ? { tool_choice: { type: "function" as const, function: { name: "propose_plan" } } }
-              : {}),
+        ...toolChoice,
       },
       { signal: turn.signal },
     );
@@ -450,6 +468,19 @@ async function runOpenAITurn(turn: Turn): Promise<boolean> {
           }
         }
       }
+    }
+  };
+
+  send({ t: "status", label: "Thinking…" });
+  try {
+    await attempt(firstChoice);
+    // The reply described a tool call instead of making it (see missedToolCall): ask again with that
+    // tool forced, once. A change to code only applies to an app that already exists.
+    const missed = calls.length ? null : missedToolCall(text);
+    if (missed && (missed !== "write_files" || Object.keys(turn.files).length > 0)) {
+      console.warn("[chat] reply described", missed, "without calling it; retrying with the tool forced");
+      send({ t: "status", label: missed === "write_files" ? "Writing code…" : "Thinking…" });
+      await attempt(forced(missed));
     }
   } catch (err) {
     if (err instanceof OpenAI.AuthenticationError) {
