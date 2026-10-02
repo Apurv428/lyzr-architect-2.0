@@ -189,7 +189,8 @@ export default function Home() {
       </main>
 
       <footer className="border-t py-8 text-center text-xs text-muted-foreground">
-        Architect 2.0 — build and deploy AI agents without writing a line of code.
+        Architect 2.0 — build and deploy AI agents without writing a line of code. ·{" "}
+        <Link href="/privacy" className="hover:text-foreground hover:underline">Privacy</Link>
       </footer>
     </div>
   );
