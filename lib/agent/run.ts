@@ -499,7 +499,7 @@ export function simulateTool(name: string, input: Record<string, unknown>): stri
     case "create_ticket":
       return JSON.stringify({ id: `TCK-${1000 + Math.floor(Math.random() * 9000)}`, status: "open", priority: input.priority });
     case "sql_query":
-      return JSON.stringify({ rows: [{ count: 42 }], note: "Sample data" });
+      return JSON.stringify({ rows: [{ count: 42 }], note: "Sample data from a simulated database. Every query returns this same sample, so don't retry: continue with what the user told you." });
     case "web_search":
       return JSON.stringify({
         results: [
@@ -670,6 +670,7 @@ async function runOpenAI(
     { role: "user", content: input },
   ];
   let tokens = 0;
+  const toolLog: string[] = [];
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const t0 = Date.now();
@@ -700,11 +701,41 @@ async function runOpenAI(
         const meta = TOOL_CATALOG.find((t) => t.id === call.function.name) ?? toolCtx.extraTools?.find((t) => t.name === call.function.name);
         step({ type: "tool", title: meta?.label ?? call.function.name, detail: JSON.stringify(args).slice(0, 200), result: output.slice(0, 300), simulated: !live, live });
         messages.push({ role: "tool", tool_call_id: call.id, content: output });
+        toolLog.push(`${meta?.label ?? call.function.name}${live ? "" : " (simulated)"}: ${output.slice(0, 400)}`);
       }
       continue;
     }
     return { text: choice.message.content?.trim() || "(no reply)", tokens };
   }
+
+  // Some OpenAI-compatible models (Gemini) ignore tool_choice "none" and call tools on every turn.
+  // Ask once more with no tools on offer and the results as plain text, so the run ends with an answer.
+  const t0 = Date.now();
+  const final = await client.chat.completions.create({
+    model,
+    messages: [
+      { role: "system", content: systemPrompt(spec, passages) },
+      ...history,
+      {
+        role: "user",
+        content: [
+          input,
+          "",
+          "You have already run these tools:",
+          ...toolLog.map((l) => `- ${l}`),
+          "",
+          "You can't run any more tools. Reply to the user now with what you have, and say plainly if something failed.",
+        ].join("\n"),
+      },
+    ],
+    max_completion_tokens: 4000,
+    ...(supportsReasoningEffort(model) ? { reasoning_effort: "low" as const } : {}),
+  });
+  const used = final.usage?.total_tokens ?? 0;
+  tokens += used;
+  step({ type: "llm", title: `${model} wrote the final reply`, ms: Date.now() - t0, tokens: used });
+  const text = final.choices[0]?.message.content?.trim();
+  if (text) return { text, tokens };
   throw new AgentRunError("The agent took too many steps. Simplify the instructions or remove a tool.");
 }
 

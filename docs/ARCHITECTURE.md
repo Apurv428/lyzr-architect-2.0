@@ -188,7 +188,7 @@ input
   → trigger, knowledge retrieval (BM25 + pgvector, rank-fused) with page citations
   → guardrail rules into the system prompt
   → coordinator (Manager → Specialist sub-agents), if present
-  → tool loop: model call → tool calls → results → model call … (max 6 turns; tools are off on the last one, so it always answers)
+  → tool loop: model call → tool calls → results → model call … (max 6 turns; if the model is still calling tools after that, it's asked once more with no tools, so a run always ends with an answer)
        tools = catalog tools (live: web search on Claude, Slack; others simulated and labelled)
              + MCP server tools (live)
   → PII redaction on the reply
