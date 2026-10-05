@@ -347,6 +347,16 @@ export function toolInputSchema(id: string) {
 }
 
 // Only Slack incoming webhook URLs are permitted — blocks SSRF against internal services.
+/**
+ * Text a model wrote for people to read. Some models (Gemini) escape line breaks twice in tool
+ * input, so the text arrives with a literal backslash-n; turn those back into real line breaks.
+ */
+export function messageText(value: unknown) {
+  return String(value ?? "")
+    .replace(/(?:\\r)?\\n/g, "\n")
+    .replace(/\\t/g, " ");
+}
+
 const SLACK_WEBHOOK_RE = /^https:\/\/hooks\.slack\.com\/services\/[A-Za-z0-9_]+\/[A-Za-z0-9_]+\/[A-Za-z0-9_]+$/;
 
 /** A tool that isn't in the catalog, such as one offered by a connected MCP server. */
@@ -424,7 +434,7 @@ export async function executeToolCall(
       const connector = await resolveConnector("slack", projectId, supabase).catch(() => null);
       if (connector) {
         const channel = String(input.channel ?? connector.meta["channel_default"] ?? "#general");
-        const result = await postSlackMessage(connector.accessToken, channel, String(input.text ?? "")).catch(() => null);
+        const result = await postSlackMessage(connector.accessToken, channel, messageText(input.text)).catch(() => null);
         if (result?.ok) return { output: JSON.stringify({ ok: true, channel, ts: result.ts }), live: true };
       }
     }
@@ -435,7 +445,7 @@ export async function executeToolCall(
         const res = await fetch(slackWebhookUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: String(input.text ?? "") }),
+          body: JSON.stringify({ text: messageText(input.text) }),
           signal: AbortSignal.timeout(5000),
         });
         if (res.ok) {
@@ -460,7 +470,7 @@ export async function executeToolCall(
         connector.accessToken,
         String(input.to ?? ""),
         String(input.subject ?? "(no subject)"),
-        String(input.body ?? ""),
+        messageText(input.body),
       ).catch(() => null);
       if (result?.ok) return { output: JSON.stringify({ status: "sent", messageId: result.messageId }), live: true };
     }

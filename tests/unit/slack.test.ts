@@ -26,6 +26,18 @@ describe("executeToolCall — slack_message", () => {
     expect(JSON.parse(init.body as string)).toEqual({ text: "Hello team" });
   });
 
+  it("turns the model's escaped line breaks into real ones before posting", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", mockFetch);
+
+    // What Gemini sends: a backslash followed by "n", not a line break.
+    const escaped = ["*URGENT TICKET*", "*Order:* 1211", "*Issue:* Shipping delay"].join(String.fromCharCode(92) + "n");
+    await executeToolCall("slack_message", { channel: "#eng", text: escaped }, { slackWebhookUrl: VALID_WEBHOOK });
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string).text.split("\n")).toEqual(["*URGENT TICKET*", "*Order:* 1211", "*Issue:* Shipping delay"]);
+  });
+
   it("simulates when no webhook URL is provided", async () => {
     const mockFetch = vi.fn();
     vi.stubGlobal("fetch", mockFetch);
