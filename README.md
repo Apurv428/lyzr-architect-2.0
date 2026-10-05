@@ -4,8 +4,8 @@
 A vibe-coding platform for agentic apps, where technical and non-technical builders work on the same project.
 
 - **Live app:** https://lyzr-architect-2-0-orcin.vercel.app
-- **Demo walkthrough (5 min):** `<add Loom link>`
-- **Try it:** sign up with any email and password. There's no email confirmation, and every account gets 100 credits a day.
+- **Demo walkthrough:** https://www.youtube.com/watch?v=azob9Wk3xyw
+- **Try it:** sign in with Google, or sign up with any email and password. There's no email confirmation, and every account gets 100 credits a day.
 
 ---
 
